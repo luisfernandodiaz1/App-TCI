@@ -2,7 +2,6 @@
   "version": 2,
   "name": "invcontrol-pro",
   "cleanUrls": true,
-  "renderers": [],
   "headers": [
     {
       "source": "/(.*)",
