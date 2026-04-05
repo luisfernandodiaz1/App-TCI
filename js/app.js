@@ -21,6 +21,13 @@ var App = (function () {
     // Forzar navegación inicial basada en hash
     var initialHash = location.hash.replace('#', '') || 'dashboard';
     navigate(initialHash);
+
+    // RESTAURAR: Sistema de escucha reactiva (V2.1)
+    DB.on(function () {
+      console.log('🔄 UI: Sincronización Cloud detectada. Refrescando...');
+      var current = location.hash.replace('#', '') || 'dashboard';
+      navigate(current);
+    });
   }
 
   // ── Data Guard ─────────────────────────────────────────────
@@ -30,7 +37,7 @@ var App = (function () {
     var docs = DB.getAll('vehicleDocuments');
     if (!fuels.length || !docs.length) {
       console.log('Reparando datos de combustible y documentos...');
-      var daysAgo = function(n) {
+      var daysAgo = function (n) {
         var d = new Date(); d.setDate(d.getDate() - n);
         return d.toISOString().split('T')[0];
       };
@@ -222,13 +229,13 @@ var App = (function () {
       var totalItems = items.length;
       var critItems = items.filter(function (i) { return Utils.stockLevel(i) === 'critical'; }).length;
       var lowItems = items.filter(function (i) { return Utils.stockLevel(i) === 'low'; }).length;
-      
+
       var openWOs = wos.filter(function (w) { return w.status === 'emitida'; }).length;
-      
-      var blockedVehiclesCount = vehts.filter(function (v) { 
-        return v.active && (VehiclesModule.isVehicleInMaintenance ? VehiclesModule.isVehicleInMaintenance(v.id).inMaintenance : false); 
+
+      var blockedVehiclesCount = vehts.filter(function (v) {
+        return v.active && (VehiclesModule.isVehicleInMaintenance ? VehiclesModule.isVehicleInMaintenance(v.id).inMaintenance : false);
       }).length;
-      
+
       var last7 = [];
       var last7Labels = [];
       for (var d = 6; d >= 0; d--) {
@@ -271,9 +278,9 @@ var App = (function () {
           wos.filter(function (w) { return w.status === 'completada' && w.closedAt && w.closedAt.length >= 7 && w.closedAt.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, w) { return acc + (Number(w.totalCost) || 0); }, 0) +
           (DB.getAll('maintenanceLogs') || []).filter(function (l) { return l.date && l.date.length >= 7 && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, l) { return acc + (Number(l.totalCost) || 0); }, 0) +
           (DB.getAll('fuelLogs') || []).filter(function (l) { return l.date && l.date.length >= 7 && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, l) { return acc + (Number(l.cost) || 0); }, 0) +
-          (DB.getAll('vehicleDocuments') || []).filter(function (d) { 
+          (DB.getAll('vehicleDocuments') || []).filter(function (d) {
             var dt = d.updatedAt || d.createdAt;
-            return dt && dt.length >= 7 && dt.substring(0, 7) === Utils.todayISO().substring(0, 7); 
+            return dt && dt.length >= 7 && dt.substring(0, 7) === Utils.todayISO().substring(0, 7);
           }).reduce(function (acc, d) { return acc + (Number(d.cost) || 0); }, 0)
         ),
         avgUsage: Utils.fmtNum(avgHoursToday) + ' hrs/v',
@@ -451,6 +458,15 @@ var App = (function () {
       '</div>' +
 
       '<div class="grid-2" style="margin-top:20px;">' +
+      
+      '<div class="card">' +
+      '<div class="card-header"><h3>🛰️ Gestión de la Nube</h3>' +
+      '<span class="badge ' + (DB.isCloudReady() ? 'badge-green' : 'badge-gray') + '" id="cloud-status-badge">' +
+      (DB.isCloudReady() ? '● Conectado' : '● Modo Local') + '</span></div>' +
+      '<p class="text-secondary text-sm" style="margin-bottom:16px;">Sincroniza tus datos locales con Firebase Cloud para acceso multiusuario.</p>' +
+      '<button class="btn btn-primary w-full" id="s-cloud-upload" ' + (DB.isCloudReady() ? '' : 'disabled') + '>🆙 Subir Datos Locales a la Nube</button>' +
+      '</div>' +
+
       '<div class="card">' +
       '<div class="card-header"><h3>💾 Backup & Restore</h3></div>' +
       '<p class="text-secondary text-sm" style="margin-bottom:16px;">Exporta o importa todos los datos de la aplicación en formato JSON.</p>' +
@@ -460,6 +476,7 @@ var App = (function () {
       '<input type="file" id="s-import-file" accept=".json" class="hidden">' +
       '</div>' +
       '</div>' +
+
       '<div class="card">' +
       '<div class="card-header"><h3>⚠️ Zona de Peligro</h3></div>' +
       '<p class="text-secondary text-sm" style="margin-bottom:16px;">Restablece todos los datos a la configuración inicial de ejemplo.</p>' +
@@ -478,6 +495,13 @@ var App = (function () {
       });
       Utils.toast('Configuración guardada.', 'success');
     };
+
+    var cloudBtn = document.getElementById('s-cloud-upload');
+    if (cloudBtn) {
+      cloudBtn.onclick = function () {
+        DB.uploadToCloud();
+      };
+    }
 
     document.getElementById('s-export-db').onclick = function () {
       var blob = new Blob([DB.exportAll()], { type: 'application/json' });
@@ -524,7 +548,7 @@ var App = (function () {
       '</select></div>' +
       '<div class="form-group"><label>Vincular con Empleado (Opcional)</label>' +
       '<select class="form-select" id="um-emp"><option value="">No vincular</option>' +
-      DB.getAll('employees').filter(function(e) { return e.active; }).map(function (e) { return '<option value="' + e.id + '"' + (user && user.employeeId === e.id ? ' selected' : '') + '>' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
+      DB.getAll('employees').filter(function (e) { return e.active; }).map(function (e) { return '<option value="' + e.id + '"' + (user && user.employeeId === e.id ? ' selected' : '') + '>' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
       '</select></div>' +
       '</div>' +
       '<div class="modal-footer"><button class="btn btn-secondary" id="um-can">Cancelar</button><button class="btn btn-primary" id="um-sv">💾 Guardar</button></div>' +
