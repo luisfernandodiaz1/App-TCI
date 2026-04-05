@@ -1,0 +1,3 @@
+- [Perfil del Usuario](user_profile.md) — Rol y preferencias del usuario Luis Diaz.
+- [Contexto del Proyecto](project_context.md) — Estado actual y misión hacia un ERP de grado producción.
+- [Reglas Contables NIF](accounting_rules.md) — Estándares financieros colombianos aplicables al sistema.

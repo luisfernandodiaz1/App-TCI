@@ -1,0 +1,157 @@
+/* ============================================================
+   KANBAN.CSS — Estilos para Kanban, Wizard, Semáforo Preventivo
+   y Filtros Avanzados de Inventario
+   ============================================================ */
+
+/* ── KANBAN BOARD ─────────────────────────────────────────── */
+.kanban-board {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+  min-height: 420px;
+  align-items: flex-start;
+}
+
+.kanban-col {
+  min-width: 255px;
+  max-width: 285px;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.kanban-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.kanban-col-title { font-weight: 700; font-size: 0.857rem; }
+
+.kanban-col-count {
+  font-size: 0.714rem; font-weight: 700; color: #fff;
+  padding: 2px 8px; border-radius: 9999px;
+  min-width: 22px; text-align: center;
+}
+
+.kanban-empty {
+  padding: 20px; text-align: center;
+  color: var(--text-muted); font-size: 0.786rem;
+  border: 2px dashed var(--border);
+  border-radius: 8px; margin: 10px;
+}
+
+.kanban-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 8px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kanban-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+
+.kanban-card-header {
+  display: flex; align-items: center;
+  justify-content: space-between; margin-bottom: 6px;
+}
+
+.kanban-card-num    { font-weight: 800; font-size: 0.857rem; color: var(--accent-cyan); }
+.kanban-card-vehicle { font-size: 0.786rem; color: var(--text-secondary); margin-bottom: 6px; font-weight: 600; }
+.kanban-card-desc   { font-size: 0.786rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+.kanban-card-footer { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.kanban-card-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ── View Toggle ──────────────────────────────────────────── */
+.view-toggle {
+  display: flex;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.view-btn {
+  padding: 6px 14px; background: transparent; border: none;
+  color: var(--text-muted); font-size: 0.786rem; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+}
+
+.view-btn.active { background: var(--accent-primary); color: #fff; }
+.view-btn:hover:not(.active) { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Wizard Steps ─────────────────────────────────────────── */
+.wizard-steps {
+  display: flex; align-items: center;
+  justify-content: center; margin-bottom: 28px; padding: 0 20px;
+}
+
+.wizard-dot-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+.wizard-dot {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--bg-elevated); border: 2px solid var(--border);
+  color: var(--text-muted); font-weight: 700; font-size: 0.9rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.wizard-dot.active { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; box-shadow: 0 0 0 4px rgba(59,130,246,0.2); }
+.wizard-dot.done   { background: var(--color-success);  border-color: var(--color-success);  color: #fff; }
+
+.wizard-dot-label { font-size: 0.714rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+
+.wizard-line { flex: 1; height: 2px; background: var(--border); margin: 0 4px; margin-bottom: 22px; transition: background 0.2s; }
+.wizard-line.active { background: var(--color-success); }
+
+/* ── Vehicle Preventive Alert Badge ───────────────────────── */
+.vehicle-preventive-alert {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 6px;
+  font-size: 0.75rem; font-weight: 600;
+  margin-bottom: 10px; flex-wrap: wrap;
+}
+
+.vehicle-preventive-alert.vpa-due  { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.25);  color: #F87171; }
+.vehicle-preventive-alert.vpa-warn { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); color: #FCD34D; }
+.vehicle-preventive-alert.vpa-ok   { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); color: #34D399; }
+
+.vpa-icon { font-size: 0.9rem; flex-shrink: 0; }
+.vpa-name { font-weight: 700; }
+.vpa-msg  { opacity: 0.8; font-size: 0.7rem; }
+
+/* ── Advanced Filters Panel ───────────────────────────────── */
+.adv-filters-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  animation: fadeInDown 0.2s ease;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.adv-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+/* ── Responsive Kanban ────────────────────────────────────── */
+@media (max-width: 900px) {
+  .kanban-board { flex-direction: column; }
+  .kanban-col { min-width: 100%; max-width: 100%; }
+}

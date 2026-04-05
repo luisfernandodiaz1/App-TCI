@@ -1,0 +1,26 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "globals": {
+    "DB": "readonly",
+    "App": "readonly",
+    "Utils": "readonly",
+    "VehiclesModule": "readonly",
+    "InventoryModule": "readonly",
+    "WorkOrdersModule": "readonly",
+    "WorkshopModule": "readonly",
+    "ReportsModule": "readonly",
+    "PurchasingModule": "readonly",
+    "EmployeesModule": "readonly",
+    "Chart": "readonly",
+    "XLSX": "readonly"
+  },
+  "parserOptions": {
+    "ecmaVersion": 12
+  },
+  "rules": {
+    "no-undef": "error"
+  }
+}

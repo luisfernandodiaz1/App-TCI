@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InvControl Pro — Gestión de Inventario y Flota de Vehículos</title>
+  <meta name="description"
+    content="Plataforma líder para el control de inventarios, gestión de flota (horómetro), taller mecánico y órdenes de trabajo (OT) para empresas de logística.">
+  <meta name="keywords" content="inventario, flota, taller, mantenimiento preventivo, horometro, gestion de flota, orden de trabajo, repuestos">
+  <meta name="author" content="InvControl Pro">
+  <meta name="robots" content="index, follow">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="InvControl Pro — Centro de Mando Logístico">
+  <meta property="og:description" content="Gestiona tu flota y bodega desde cualquier lugar. Panel Kanban, gestión de repuestos y control de costos en tiempo real.">
+  <meta property="og:image" content="https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=1200">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="InvControl Pro">
+  <meta name="twitter:description" content="Gestión avanzada de inventarios y flota.">
+
+  <!-- PWA & Mobile -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#3b82f6">
+
+  <!-- Application CSS -->
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/kanban.css">
+
+  <!-- Firebase SDK (v8 Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════════════════
+     APP SHELL
+════════════════════════════════════════════════════ -->
+  <div class="app-shell">
+
+    <!-- ── SIDEBAR ───────────────────────────────────── -->
+    <aside class="sidebar" id="app-sidebar">
+
+      <!-- Logo -->
+      <div class="sidebar-logo">
+        <div class="logo-icon">IC</div>
+        <div class="logo-text">
+          <h2>InvControl</h2>
+          <span>Sistema de Inventario</span>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="sidebar-nav">
+
+        <div class="nav-section-label">Principal</div>
+
+        <div class="nav-item active" data-section="dashboard">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Dashboard</span>
+        </div>
+
+        <div class="nav-section-label">Módulos</div>
+
+        <div class="nav-item" data-section="inventory">
+          <span class="nav-icon">📦</span>
+          <span class="nav-label">Inventario</span>
+          <span class="nav-badge hidden" id="badge-inventory">0</span>
+        </div>
+
+        <div class="nav-item" data-section="vehicles">
+          <span class="nav-icon">🚗</span>
+          <span class="nav-label">Vehículos</span>
+        </div>
+
+        <div class="nav-item" data-section="purchasing">
+          <span class="nav-icon">🛒</span>
+          <span class="nav-label">Compras y Faltantes</span>
+        </div>
+
+        <div class="nav-item" data-section="workorders">
+          <span class="nav-icon">🔧</span>
+          <span class="nav-label">Órdenes de Trabajo</span>
+          <span class="nav-badge hidden" id="badge-workorders">0</span>
+        </div>
+
+        <div class="nav-item" data-section="workshop">
+          <span class="nav-icon">🛠️</span>
+          <span class="nav-label">Vista Taller</span>
+          <span class="nav-badge hidden" id="badge-workshop">0</span>
+        </div>
+
+        <div class="nav-section-label">Análisis</div>
+
+        <div class="nav-item" data-section="reports">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">Reportes</span>
+        </div>
+
+        <div class="nav-item" data-section="employees">
+          <span class="nav-icon">👥</span>
+          <span class="nav-label">Empleados</span>
+        </div>
+
+        <div class="nav-section-label">Sistema</div>
+
+        <div class="nav-item" data-section="settings">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Configuración</span>
+        </div>
+
+      </nav>
+
+      <!-- User area -->
+      <div class="sidebar-bottom">
+        <div class="user-card" id="active-user-card" title="Cambiar usuario" onclick="App.showUserSwitcher()">
+          <div class="user-avatar" id="sidebar-avatar">--</div>
+          <div class="user-info">
+            <div class="user-name" id="sidebar-user-name">Cargando...</div>
+            <div class="user-role-badge" id="sidebar-user-role">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Collapse toggle -->
+      <button class="sidebar-toggle" id="sidebar-toggle" title="Colapsar menú">‹</button>
+    </aside>
+
+    <!-- ── CONTENT ────────────────────────────────────── -->
+    <div class="content-wrapper">
+
+      <!-- Top Header -->
+      <header class="top-header no-print">
+        <div class="header-left">
+          <span class="page-title" id="page-title">🏠 Dashboard</span>
+        </div>
+
+        <div class="header-search">
+          <span style="color:var(--text-muted);">🔍</span>
+          <input type="text" placeholder="Buscar en la aplicación..." id="global-search" aria-label="Búsqueda global">
+        </div>
+
+        <div class="header-right">
+          <button class="header-btn" id="notif-btn" title="Alertas" onclick="App.go('inventory')">
+            🔔
+            <span class="notif-dot" id="notif-dot" style="display:none;"></span>
+          </button>
+          <div
+            style="display:flex;align-items:center;gap:8px;padding:4px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);cursor:pointer;"
+            onclick="App.showUserSwitcher()">
+            <div class="user-avatar" id="header-avatar" style="width:28px;height:28px;font-size:0.75rem;">--</div>
+            <span style="font-size:0.857rem;font-weight:500;" id="header-user-name">—</span>
+            <span style="color:var(--text-muted);font-size:0.75rem;">▾</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main class="main-content">
+
+        <!-- Dashboard -->
+        <section class="page-section" id="section-dashboard"></section>
+
+        <!-- Inventory -->
+        <section class="page-section" id="section-inventory"></section>
+
+        <!-- Vehicles -->
+        <section class="page-section" id="section-vehicles"></section>
+
+        <!-- Purchasing -->
+        <section class="page-section" id="section-purchasing"></section>
+
+        <!-- Work Orders -->
+        <section class="page-section" id="section-workorders"></section>
+
+        <!-- Workshop -->
+        <section class="page-section" id="section-workshop"></section>
+
+        <!-- Reports -->
+        <section class="page-section" id="section-reports"></section>
+
+        <!-- Employees -->
+        <section class="page-section" id="section-employees"></section>
+
+        <!-- Settings -->
+        <section class="page-section" id="section-settings"></section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Toast container (dynamic) -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- ═══════════════════════════════════════════════════
+     JAVASCRIPT — Order matters!
+════════════════════════════════════════════════════ -->
+  <!-- Chart.js (Gráficas) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SheetJS (Excel Exports) -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/vehicles.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/purchasing.js"></script>
+  <script src="js/workorders.js"></script>
+  <script src="js/workshop.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/employees.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+
+</html>
