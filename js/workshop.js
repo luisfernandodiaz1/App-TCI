@@ -606,12 +606,28 @@ var WorkshopModule = (function () {
         if (!empId) { Utils.toast('Selecciona un mecánico.', 'warning'); return; }
         var emp = DB.getById('employees', empId);
         if (!emp) return;
+
+        // ── Anti-duplicado: verificar si ya está en la lista ──
+        var yaExiste = mechList.some(function(m) { return m.id === emp.id; });
+        if (yaExiste) {
+          Utils.toast('⚠️ ' + emp.name + ' ya está en la lista de mano de obra.', 'warning');
+          selEl.value = ''; // Limpiar selección
+          return;
+        }
+
         mechList.push({ id: emp.id, name: emp.name, rate: (emp.monthlySalary || 0) / (settings.monthlyWorkingHours || 220), hours: 0 });
         WorkshopModule._mechList = mechList;
+
+        // Remover del selector para no poder agregarlo doble
+        var optToRemove = selEl.querySelector('option[value="' + emp.id + '"]');
+        if (optToRemove) optToRemove.remove();
+        selEl.value = '';
+
         document.getElementById('fin-mech-list').innerHTML = buildMechRows();
         WorkshopModule._updateFinTotal();
       };
     }
+
 
     WorkshopModule._updateFinTotal = function() {
       var totalLabor = 0;
