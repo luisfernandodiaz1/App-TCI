@@ -363,6 +363,19 @@ var WorkshopModule = (function () {
       '</div></div>' : '') +
       '<div id="dlv-mats">' + buildMatHtml() + '</div>' +
       '<div class="divider"></div>' +
+      // ── GESTIÓN DE EQUIPO ──
+      (!isCompleted ? 
+      '<div class="form-group" style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;">' +
+      '<label>👥 Unir Mecánico al Equipo (Ayudante/Asistente)</label>' +
+      '<div class="flex gap-2" style="margin-top:4px;">' +
+      '<select class="form-select" id="dlv-join-mech" style="flex:1;">' +
+      '<option value="">Seleccionar mecánico...</option>' +
+      DB.getAll('employees').filter(function(e){ return e.active && e.isTechnician; }).map(function(e){ return '<option value="' + e.id + '">' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
+      '</select>' +
+      '<button class="btn btn-primary btn-sm" id="dlv-btn-join">+ Unir a OT</button>' +
+      '</div>' +
+      '<div class="text-xs text-muted" style="margin-top:4px;">Esto registrará su participación sin necesidad de pedir un repuesto.</div>' +
+      '</div>' : '') +
       '<div class="form-group"><label>Observaciones del técnico</label><textarea class="form-textarea" id="dlv-notes" rows="3" ' + (isCompleted ? 'disabled' : '') + '>' + Utils.escapeHtml(wo.notes || '') + '</textarea></div>' +
       '</div>' +
       '<div class="modal-footer">' +
@@ -441,6 +454,43 @@ var WorkshopModule = (function () {
         Utils.toast('OT pausada. En espera de repuestos.', 'warning');
         close(); render(); App.updateBadges();
       };
+
+      // ── Handler para UNIR MECÁNICO ──
+      var btnJoin = document.getElementById('dlv-btn-join');
+      if (btnJoin) {
+        btnJoin.onclick = function() {
+          var sel = document.getElementById('dlv-join-mech');
+          var empId = sel ? sel.value : null;
+          if (!empId) { Utils.toast('Selecciona un mecánico.', 'warning'); return; }
+
+          var emp = DB.getById('employees', empId);
+          if (!emp) return;
+
+          // ── Anti-duplicado: verificar si ya fue registrado en el activityLog ──
+          var woFresh = DB.getById('workOrders', woId);
+          var yaRegistrado = (woFresh.activityLog || []).some(function(log) {
+            return log.userId === empId;
+          });
+          if (yaRegistrado) {
+            Utils.toast('⚠️ ' + emp.name + ' ya está registrado en el equipo de esta OT.', 'warning');
+            sel.value = '';
+            return;
+          }
+
+          // Registrar log de participación proactiva con ID del empleado como userId
+          WorkOrdersModule.addWOLog(
+            woId,
+            emp.name + ' se unió al equipo de trabajo.',
+            empId // ID del empleado → aparecerá sugerido en cierre financiero
+          );
+
+          Utils.toast('✅ ' + emp.name + ' ha sido agregado al equipo.', 'success');
+          sel.value = '';
+          close();
+          openDeliverModal(woId);
+        };
+      }
+
 
       document.getElementById('dlv-close-ot').onclick = function () {
         var currentWo = DB.getById('workOrders', woId);
