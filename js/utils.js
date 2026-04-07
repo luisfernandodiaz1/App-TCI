@@ -302,21 +302,57 @@ var Utils = (function () {
       '<h2 style="margin-top:20px;margin-bottom:6px;">Observaciones</h2>' +
       '<p style="border:1px solid #ccc;padding:10px;min-height:40px;">' + escapeHtml(wo.notes || '') + '</p>';
 
-    if (wo.status === 'completada') {
-      var laborEntries = wo.laborEntries || [];
-      var matSum = (wo.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
+    // ── EQUIPO DE TRABAJO (siempre visible) ──────────────────────────
+    // Construir el equipo: laborEntries si está cerrada, activityLog si está abierta
+    var allEmpsForPrint = DB.getAll('employees');
+    var equipoMostrar = []; // [{ name, hours, cost, isClosed }]
 
-      html += '<h2 style="margin-top:20px;margin-bottom:6px;">Equipo de Trabajo</h2>';
-      if (laborEntries.length) {
+    if ((wo.laborEntries || []).length) {
+      // OT cerrada: usar datos reales con horas y costos
+      equipoMostrar = wo.laborEntries.map(function(e) {
+        return { name: e.name, hours: e.hours, cost: e.cost, isClosed: true };
+      });
+    } else {
+      // OT abierta: construir desde activityLog — IDs únicos que sean empleados
+      var seenIds = {};
+      // 1. Siempre incluir el responsable principal
+      if (wo.assignedTo) {
+        var mainEmpPrint = allEmpsForPrint.find(function(e){ return e.id === wo.assignedTo; });
+        if (mainEmpPrint) { seenIds[wo.assignedTo] = true; equipoMostrar.push({ name: mainEmpPrint.name, hours: null, cost: null, isClosed: false }); }
+      }
+      // 2. Participantes del activityLog
+      (wo.activityLog || []).forEach(function(log) {
+        if (log.userId && !seenIds[log.userId]) {
+          var logEmp = allEmpsForPrint.find(function(e){ return e.id === log.userId; });
+          if (logEmp) { seenIds[log.userId] = true; equipoMostrar.push({ name: logEmp.name, hours: null, cost: null, isClosed: false }); }
+        }
+      });
+    }
+
+    html += '<h2 style="margin-top:20px;margin-bottom:6px;">Equipo de Trabajo</h2>';
+    if (equipoMostrar.length) {
+      if (equipoMostrar[0].isClosed) {
+        // Con horas y costos (OT completada)
         html += '<table><thead><tr><th>Mecánico</th><th style="text-align:center;width:100px;">Horas</th><th style="text-align:right;width:130px;">Costo M.O.</th></tr></thead><tbody>';
-        laborEntries.forEach(function(e) {
+        equipoMostrar.forEach(function(e) {
           html += '<tr><td>' + escapeHtml(e.name) + '</td><td style="text-align:center;">' + e.hours + ' hrs</td><td style="text-align:right;">$ ' + fmtNum(e.cost) + '</td></tr>';
         });
         html += '</tbody></table>';
       } else {
-        html += '<p style="border:1px solid #ccc;padding:10px;">' + escapeHtml(tecnico ? tecnico.name : 'Sin asignar') + '</p>';
+        // Solo nombres (OT en proceso)
+        html += '<table><thead><tr><th>Mecánico</th><th style="text-align:center;width:160px;">Estado</th></tr></thead><tbody>';
+        equipoMostrar.forEach(function(e, i) {
+          html += '<tr><td>' + escapeHtml(e.name) + '</td><td style="text-align:center;">' + (i === 0 ? '<strong>Responsable</strong>' : 'Participante') + '</td></tr>';
+        });
+        html += '</tbody></table>';
       }
+    } else {
+      html += '<p style="border:1px solid #ccc;padding:10px;">Sin técnico asignado</p>';
+    }
 
+    // ── DESGLOSE FINANCIERO (solo si está completada) ─────────────────
+    if (wo.status === 'completada') {
+      var matSum = (wo.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
       html += '<h2 style="margin-top:20px;margin-bottom:6px;">Desglose Financiero (Costo de Mantenimiento)</h2>' +
         '<table class="meta-table" style="width:50%; margin-bottom:20px;"><tbody>' +
         '<tr><td>Costo Repuestos consumidos</td><td style="text-align:right;">$ ' + fmtNum(matSum) + '</td></tr>' +
@@ -326,10 +362,10 @@ var Utils = (function () {
         '</tbody></table>';
     }
 
-    // Firmas — una por mecánico si hay laborEntries, si no la clásica
+    // ── FIRMAS ────────────────────────────────────────────────────────
     var signBoxes;
-    if ((wo.laborEntries || []).length > 1) {
-      signBoxes = wo.laborEntries.map(function(e) {
+    if (equipoMostrar.length > 1) {
+      signBoxes = equipoMostrar.map(function(e) {
         return '<div class="sign-box"><div class="sign-line">' + escapeHtml(e.name) + '</div></div>';
       }).join('');
     } else {
