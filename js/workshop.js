@@ -508,7 +508,7 @@ var WorkshopModule = (function () {
             notes: notes,
             laborCost: finData.labor,
             externalCost: finData.external,
-            laborHours: finData.hours || 0,
+            laborHours: (finData.laborEntries || []).reduce(function (acc, e) { return acc + (e.hours || 0); }, 0),
             materialBase: finData.matBase,
             totalCost: finData.total,
             laborEntries: finData.laborEntries || []  // Array multi-mecánico
