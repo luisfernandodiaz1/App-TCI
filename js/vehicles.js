@@ -258,7 +258,7 @@ var VehiclesModule = (function () {
             '<td class="text-sm">' + Utils.fmtNum(a.routine.lastPerformedHours) + ' hrs<br>' + Utils.formatDate(a.routine.lastPerformedDate) + '</td>' +
             '<td>' + badge + '<div class="text-xs ' + (a.isDue ? 'text-red' : (a.isWarning ? 'text-amber' : 'text-muted')) + '" style="margin-top:4px;">' + a.msg + '</div></td>' +
             '<td>' +
-            (a.isDue || a.isWarning ? '<button class="btn btn-primary btn-sm" onclick="VehiclesModule.showQuickMaintenanceModal(\'' + a.routine.id + '\')">⚡ Registrar Mtto.</button>' : '') +
+            (a.isDue || a.isWarning ? '<button class="btn btn-primary btn-sm" style="gap:6px;" onclick="WorkOrdersModule.showWizard(\'' + a.vehicle.id + '\',{routineId:\'' + a.routine.id + '\',routineName:' + JSON.stringify(a.routine.name) + ',isPreventive:true,priority:\'alta\'})">🔧 Crear OT Preventiva</button>' : '') +
             '</td>' +
             '</tr>';
         }).join('') +

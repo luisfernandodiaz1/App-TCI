@@ -7,6 +7,7 @@ var WorkshopModule = (function () {
 
   var searchText = '';
   var filterMode = 'all'; // 'all' | 'mine' | 'high'
+  var workshopTab = 'reparaciones'; // 'reparaciones' | 'preventivos'
 
   function render() {
     var settings = DB.getSettings();
@@ -22,36 +23,55 @@ var WorkshopModule = (function () {
       return;
     }
 
+    // ── Separar OTs: Correctivas vs Preventivas ─────────────
     var allWOs = DB.getAll('workOrders').filter(function (w) { return w.status !== 'borrador' && w.status !== 'cancelada'; });
     var empId = activeUser ? activeUser.employeeId : null;
 
-    // 1. Filtrado por modo (Poka-Yoke de enfoque)
+    // Filtrar por modo (mine, high)
+    var baseWOs = allWOs.slice();
     if (filterMode === 'mine' && empId) {
-      allWOs = allWOs.filter(function (w) { return w.assignedTo === empId; });
+      baseWOs = baseWOs.filter(function (w) { return w.assignedTo === empId; });
     } else if (filterMode === 'high') {
-      allWOs = allWOs.filter(function (w) { return w.priority === 'alta'; });
+      baseWOs = baseWOs.filter(function (w) { return w.priority === 'alta'; });
     }
-
-    // 2. Filtrado por texto (Búsqueda en tiempo real)
     if (searchText) {
       var q = searchText.toLowerCase();
-      allWOs = allWOs.filter(function (w) {
+      baseWOs = baseWOs.filter(function (w) {
         return (w.number || '').toLowerCase().includes(q) ||
           (w.vehiclePlate || '').toLowerCase().includes(q) ||
           (w.description || '').toLowerCase().includes(q);
       });
     }
 
+    // Separar por tipo
+    var repWOs = baseWOs.filter(function (w) { return !w.isPreventive; });
+    var prevWOs = baseWOs.filter(function (w) { return !!w.isPreventive; });
+    var activeWOs = workshopTab === 'preventivos' ? prevWOs : repWOs;
+
     // Columnas Kanban
-    var colPendientes = allWOs.filter(function (w) { return w.status === 'emitida'; });
-    var colProceso = allWOs.filter(function (w) { return w.status === 'en_proceso'; });
-    var colPausadas = allWOs.filter(function (w) { return w.status === 'esperando_repuestos'; });
-    var colCerradas = allWOs.filter(function (w) { return w.status === 'completada'; }).sort(function(a,b){ return b.closedAt > a.closedAt ? 1 : -1; }).slice(0, 5);
+    var colPendientes = activeWOs.filter(function (w) { return w.status === 'emitida'; });
+    var colProceso = activeWOs.filter(function (w) { return w.status === 'en_proceso'; });
+    var colPausadas = activeWOs.filter(function (w) { return w.status === 'esperando_repuestos'; });
+    var colCerradas = activeWOs.filter(function (w) { return w.status === 'completada'; }).sort(function(a,b){ return b.closedAt > a.closedAt ? 1 : -1; }).slice(0, 5);
+
+    // Contadores por tab — para badges
+    var repPendCount = repWOs.filter(function (w) { return w.status === 'emitida' || w.status === 'en_proceso' || w.status === 'esperando_repuestos'; }).length;
+    var prevPendCount = prevWOs.filter(function (w) { return w.status === 'emitida' || w.status === 'en_proceso' || w.status === 'esperando_repuestos'; }).length;
 
     var html = '<div class="section-header">' +
-      '<div class="section-header-left"><h2>🛠️ Tablero Kanban Taller</h2>' +
+      '<div class="section-header-left"><h2>🛠️ Vista Taller</h2>' +
       (activeUser ? '<span class="badge badge-cyan">' + Utils.escapeHtml(activeUser.name) + '</span>' : '') +
       '</div>' +
+      '</div>';
+
+    // ── Selector de modo: Reparaciones / Preventivos ─────────
+    html += '<div style="display:flex;align-items:center;gap:0;margin-bottom:20px;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;width:fit-content;">' +
+      '<button id="ws-tab-rep" style="' + (workshopTab === 'reparaciones' ? 'background:var(--accent-primary);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);') + 'border:none;padding:10px 20px;font-size:0.875rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;">🔧 Reparaciones' +
+      (repPendCount > 0 ? ' <span style="background:var(--color-danger);color:#fff;border-radius:999px;padding:1px 7px;font-size:0.72rem;font-weight:700;">' + repPendCount + '</span>' : '') +
+      '</button>' +
+      '<button id="ws-tab-prev" style="' + (workshopTab === 'preventivos' ? 'background:var(--accent-primary);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);') + 'border:none;padding:10px 20px;font-size:0.875rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;">📅 Mantenimientos Preventivos' +
+      (prevPendCount > 0 ? ' <span style="background:var(--color-warning);color:#000;border-radius:999px;padding:1px 7px;font-size:0.72rem;font-weight:700;">' + prevPendCount + '</span>' : '') +
+      '</button>' +
       '</div>';
 
     // Toolbar de búsqueda y filtros
@@ -66,12 +86,20 @@ var WorkshopModule = (function () {
       '</div>' +
       '</div>';
 
-    if (allWOs.length === 0 && (searchText || filterMode !== 'all')) {
+    if (activeWOs.length === 0 && (searchText || filterMode !== 'all')) {
       html += '<div class="card"><div class="empty-state" style="padding:40px;">' +
         '<div class="empty-state-icon">🔎</div><h3>Sin resultados</h3>' +
         '<p>No se encontraron órdenes con esos criterios.</p>' +
         '<button class="btn btn-secondary btn-sm" onclick="WorkshopModule.resetFilters()">Limpiar Filtros</button>' +
         '</div></div>';
+    } else if (activeWOs.length === 0) {
+      var emptyIcon = workshopTab === 'preventivos' ? '📅' : '🔧';
+      var emptyMsg = workshopTab === 'preventivos'
+        ? 'No hay mantenimientos programados. Créalos desde <strong>Vehículos > Alertas Preventivas</strong>.'
+        : 'No hay órdenes de reparación activas.';
+      html += '<div class="card"><div class="empty-state" style="padding:48px;">' +
+        '<div class="empty-state-icon">' + emptyIcon + '</div>' +
+        '<h3>Sin órdenes</h3><p>' + emptyMsg + '</p></div></div>';
     } else {
       html += '<div class="kanban-board">' +
         renderKanbanCol('📨 PENDIENTES', colPendientes, 'amber', 'pendiente') +
@@ -84,6 +112,11 @@ var WorkshopModule = (function () {
     var container = document.getElementById('section-workshop');
     if (container) {
       container.innerHTML = html;
+      // Tab switchers
+      var tabRep = document.getElementById('ws-tab-rep');
+      var tabPrev = document.getElementById('ws-tab-prev');
+      if (tabRep) tabRep.onclick = function() { workshopTab = 'reparaciones'; render(); };
+      if (tabPrev) tabPrev.onclick = function() { workshopTab = 'preventivos'; render(); };
       var searchInput = document.getElementById('ws-search');
       if (searchInput) {
         searchInput.oninput = Utils.debounce(function () {
@@ -128,11 +161,17 @@ var WorkshopModule = (function () {
     var timeLabel = daysOpen === 0 ? 'Hoy' : 'Hace ' + daysOpen + ' d';
     var priorityColor = wo.priority === 'alta' ? '#ef4444' : (wo.priority === 'media' ? '#f59e0b' : '#10b981');
 
-    var html = '<div class="kanban-card" style="border-left:4px solid ' + priorityColor + '; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">' +
+    // Badge especial para OTs preventivas
+    var prevBadgeHtml = wo.isPreventive
+      ? '<div style="margin-bottom:6px;padding:4px 8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:6px;font-size:0.72rem;font-weight:700;color:var(--color-warning);">📅 Preventivo: ' + Utils.escapeHtml(wo.routineName || 'Rutina') + '</div>'
+      : '';
+
+    var html = '<div class="kanban-card" style="border-left:4px solid ' + priorityColor + '; box-shadow: 0 4px 12px rgba(0,0,0,0.1);' + (wo.isPreventive ? 'border-top:2px solid var(--color-warning);' : '') + '">' +
       '<div class="flex justify-between items-center" style="margin-bottom:6px;">' +
       '<span class="kanban-card-num">' + Utils.escapeHtml(wo.number) + '</span>' +
       '<span class="text-xs text-muted" style="font-weight:600;">⏱️ ' + timeLabel + '</span>' +
       '</div>' +
+      prevBadgeHtml +
       (wo.vehiclePlate ? '<div class="kanban-card-vehicle">🚗 ' + Utils.escapeHtml(wo.vehiclePlate) + '</div>' : '') +
       '<div class="kanban-card-desc" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.4em;">' + Utils.escapeHtml(wo.description) + '</div>';
 
@@ -387,6 +426,12 @@ var WorkshopModule = (function () {
           return;
         }
 
+        // Poka-Yoke: Si es preventiva, el horómetro es crítico para resetear la rutina
+        if (currentWo.isPreventive) {
+          var horaInicial = currentWo.vehicleHours || 0;
+          // La advertencia se mostrará en el modal de cierre financiero
+        }
+
         var hasPending = (currentWo.materials || []).some(function (m) { return (m.qtyDelivered || 0) < m.qtyRequested; });
         showFinancialCloseModal(currentWo, hasPending, function (finData) {
           var notes = document.getElementById('dlv-notes').value.trim();
@@ -401,7 +446,15 @@ var WorkshopModule = (function () {
             materialBase: finData.matBase,
             totalCost: finData.total
           });
-          Utils.toast('✅ OT finalizada exitosamente.', 'success', 4000);
+
+          // ── FASE 4: Sincronizar rutina si es preventiva ──
+          var closedWo = DB.getById('workOrders', woId);
+          if (closedWo && closedWo.isPreventive) {
+            WorkOrdersModule.syncRoutineOnClose(closedWo, finData.finalHours, Utils.todayISO());
+            Utils.toast('✅ OT Preventiva finalizada. Rutina sincronizada automáticamente. ➰', 'success', 5000);
+          } else {
+            Utils.toast('✅ OT finalizada exitosamente.', 'success', 4000);
+          }
           close(); render(); App.updateBadges();
         });
       };
@@ -439,10 +492,12 @@ var WorkshopModule = (function () {
       '</div>' +
       '<div class="form-grid">' +
       '<div class="form-group"><label>Subtotal Repuestos</label><input class="form-input" type="text" disabled value="$ ' + Utils.fmtNum(matBaseSum) + '"></div>' +
+      (wo.isPreventive ? '<div class="form-group"><label style="color:var(--color-warning);font-weight:700;">📏 Horómetro Final (Horas) * <span style="font-size:0.7rem;font-weight:400;">(Obligatorio para actualizar la rutina)</span></label><input class="form-input" type="number" min="' + (wo.vehicleHours || 0) + '" step="0.1" id="fin-horometro-final" value="' + (wo.vehicleHours || 0) + '"></div>' : '') +
       '<div class="form-group"><label>Horas Trabajadas</label><input class="form-input" type="number" min="0" step="0.5" id="fin-hours" value="0"></div>' +
       '<div class="form-group"><label>Costo Mano de Obra ($)</label><input class="form-input" type="number" min="0" id="fin-labor" value="0"></div>' +
       '<div class="form-group"><label>Servicios Externos ($)</label><input class="form-input" type="number" min="0" id="fin-ext" value="0"></div>' +
       '</div>' +
+
       '<div id="fin-total-pre" style="margin-top:16px;padding:12px;background:var(--bg-elevated);border-radius:8px;text-align:right;">' +
       '<div class="text-xs text-muted">RESUMEN FINAL:</div>' +
       '<div style="font-weight:700;font-size:1.2rem;color:var(--color-success);margin-top:4px;">TOTAL ESTIMADO: $ ' + Utils.fmtNum(matTotalSum) + '</div>' +
@@ -492,9 +547,17 @@ var WorkshopModule = (function () {
       var h = parseFloat(document.getElementById('fin-hours').value) || 0;
       var l = parseInt(document.getElementById('fin-labor').value) || 0;
       var e = parseInt(document.getElementById('fin-ext').value) || 0;
-      
+      var horoFinalEl = document.getElementById('fin-horometro-final');
+      var horoFinal = horoFinalEl ? (parseFloat(horoFinalEl.value) || 0) : 0;
+
       if (h < 0 || l < 0 || e < 0) {
         Utils.toast('Los costos y las horas no pueden ser negativos.', 'error');
+        return;
+      }
+
+      // Poka-Yoke para OTs preventivas: el horómetro final es obligatorio
+      if (wo.isPreventive && horoFinal <= (wo.vehicleHours || 0)) {
+        Utils.toast('⚠️ Para OTs preventivas, el Horómetro Final debe ser mayor al inicial (' + (wo.vehicleHours || 0) + ' hrs).', 'warning');
         return;
       }
 
@@ -510,7 +573,8 @@ var WorkshopModule = (function () {
         labor: l,
         external: e,
         matBase: matBaseSum,
-        total: total
+        total: total,
+        finalHours: horoFinal  // Horómetro final para sincronizar la rutina
       });
     };
   }

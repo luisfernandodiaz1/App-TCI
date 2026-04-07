@@ -174,12 +174,26 @@ var WorkOrdersModule = (function () {
           '<button class="btn btn-ghost btn-sm" onclick="WorkOrdersModule.deleteWO(\'' + Utils.escapeHtml(wo.id) + '\')">🗑️</button>' +
           '</div></td></tr>';
       }).join('') +
-      '</tbody></table></div><div class="pagination"><span>' + wos.length + ' órdenes</span></div></div>';
+      '</tbody></table></div>' +
+      '<div class="p-4 text-center">' +
+      '<button class="btn btn-ghost" onclick="App.loadMore(\'workOrders\')">🔄 Cargar registros anteriores</button>' +
+      '</div>' +
+      '<div class="pagination"><span>' + wos.length + ' órdenes cargadas</span></div></div>';
   }
 
   // ── WIZARD ────────────────────────────────────────────────
-  function showWizard(preloadVehicleId) {
+  function showWizard(preloadVehicleId, prefillData) {
     if (preloadVehicleId) { wizData.vehicleId = preloadVehicleId; }
+    // Si viene de una rutina preventiva, pre-cargar datos
+    if (prefillData) {
+      wizData.routineId = prefillData.routineId || null;
+      wizData.routineName = prefillData.routineName || null;
+      wizData.isPreventive = prefillData.isPreventive || false;
+      if (prefillData.priority) wizData.priority = prefillData.priority;
+      if (prefillData.routineName) {
+        wizData.description = 'Mantenimiento Preventivo: ' + prefillData.routineName;
+      }
+    }
     var old = document.getElementById('wiz-modal'); if (old) old.remove();
 
     var html = '<div class="modal-overlay" id="wiz-modal"><div class="modal modal-lg">' +
@@ -224,8 +238,12 @@ var WorkOrdersModule = (function () {
 
     if (wizStep === 1) {
       var vehicles = DB.getAll('vehicles').filter(function (v) { return v.active; });
+      var isPreventiveBanner = wizData.isPreventive
+        ? '<div class="alert-banner warning" style="margin-bottom:16px;border-left:4px solid var(--color-warning);">🔧 <strong>OT de Mantenimiento Preventivo</strong> — Rutina: <strong>' + Utils.escapeHtml(wizData.routineName || '') + '</strong></div>'
+        : '';
       content.innerHTML =
         '<h4 style="margin-bottom:16px;">Paso 1: Selecciona el Vehículo</h4>' +
+        isPreventiveBanner +
         '<div class="form-group"><label>Fecha de la OT</label><input class="form-input" type="date" id="wf-date" value="' + (wizData.date || Utils.todayISO()) + '"></div>' +
         '<div class="form-group"><label>Vehículo</label>' +
         '<select class="form-select" id="wf-veh" onchange="WorkOrdersModule.updateWizKm(this)">' +
@@ -409,12 +427,31 @@ var WorkOrdersModule = (function () {
       requesterName: currentUser ? currentUser.name : 'Sistema',
       laborCost: 0, externalCost: 0, totalCost: 0,
       closedAt: null,
-      createdAt: Utils.todayISO()
+      createdAt: Utils.todayISO(),
+      // ── Campos de Mantenimiento Preventivo ──
+      isPreventive: wizData.isPreventive || false,
+      routineId: wizData.routineId || null,
+      routineName: wizData.routineName || null
     };
     DB.create('workOrders', data);
-    Utils.toast('✅ OT ' + data.number + ' creada exitosamente.', 'success', 4000);
+    var msg = data.isPreventive
+      ? '✅ OT Preventiva ' + data.number + ' creada. Ve a Vista Taller para gestionarla.'
+      : '✅ OT ' + data.number + ' creada exitosamente.';
+    Utils.toast(msg, 'success', 5000);
     document.getElementById('wiz-modal').remove();
     render(); App.updateBadges();
+  }
+
+  // ── Sincronización de Rutina al Completar OT Preventiva ────
+  function syncRoutineOnClose(wo, finalHours, finalDate) {
+    if (!wo.isPreventive || !wo.routineId) return;
+    var routine = DB.getById('preventiveRoutines', wo.routineId);
+    if (!routine) return;
+    DB.update('preventiveRoutines', wo.routineId, {
+      lastPerformedHours: finalHours,
+      lastPerformedDate: finalDate
+    });
+    console.log('🔄 Rutina sincronizada: ' + routine.name + ' | Horas: ' + finalHours + ' | Fecha: ' + finalDate);
   }
 
   // ── Expose for inline onclick ──────────────────────────────
@@ -737,6 +774,7 @@ var WorkOrdersModule = (function () {
     deleteWO: deleteWO,
     printWO: printWO,
     _rmMat: _rmMat,
-    updateWizKm: updateWizKm
+    updateWizKm: updateWizKm,
+    syncRoutineOnClose: syncRoutineOnClose
   };
 })();
