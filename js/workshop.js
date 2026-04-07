@@ -43,9 +43,10 @@ var WorkshopModule = (function () {
       });
     }
 
-    // Separar por tipo
-    var repWOs = baseWOs.filter(function (w) { return !w.isPreventive; });
-    var prevWOs = baseWOs.filter(function (w) { return !!w.isPreventive; });
+    // Separar por tipo — usa maintenanceType con fallback a isPreventive (retrocompatibilidad)
+    function isPreventiveWO(w) { return w.maintenanceType === 'preventivo' || (!w.maintenanceType && !!w.isPreventive); }
+    var repWOs = baseWOs.filter(function (w) { return !isPreventiveWO(w); });
+    var prevWOs = baseWOs.filter(function (w) { return isPreventiveWO(w); });
     var activeWOs = workshopTab === 'preventivos' ? prevWOs : repWOs;
 
     // Columnas Kanban

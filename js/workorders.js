@@ -121,6 +121,7 @@ var WorkOrdersModule = (function () {
             '<span class="kanban-card-num">' + Utils.escapeHtml(wo.number) + '</span>' +
             Utils.priorityBadge(wo.priority) +
             '</div>' +
+            '<div style="margin-bottom:6px;">' + Utils.maintenanceTypeBadge(wo.maintenanceType || (wo.isPreventive ? 'preventivo' : 'correctivo')) + '</div>' +
             (wo.vehiclePlate ? '<div class="kanban-card-vehicle">🚗 ' + Utils.escapeHtml(wo.vehiclePlate) + '</div>' : '') +
             '<div class="kanban-card-desc">' + Utils.escapeHtml(wo.description.substring(0, 70)) + (wo.description.length > 70 ? '...' : '') + '</div>' +
             '<div class="kanban-card-footer">' +
@@ -151,7 +152,7 @@ var WorkOrdersModule = (function () {
       return '<div class="card"><div class="empty-state"><div class="empty-state-icon">🔧</div><h3>No hay órdenes de trabajo</h3><p>Crea la primera OT usando el botón superior.</p></div></div>';
     }
     return '<div class="card" style="padding:0;"><div class="table-wrapper"><table><thead><tr>' +
-      '<th>Número</th><th>Fecha</th><th>Vehículo</th><th>Descripción</th><th>Prioridad</th><th>Estado</th><th>Técnico</th><th>Materiales</th><th>Acciones</th>' +
+      '<th>Número</th><th>Fecha</th><th>Tipo</th><th>Vehículo</th><th>Descripción</th><th>Prioridad</th><th>Estado</th><th>Técnico</th><th>Materiales</th><th>Acciones</th>' +
       '</tr></thead><tbody>' +
       wos.map(function (wo) {
         var tech = eMap[wo.assignedTo];
@@ -160,6 +161,7 @@ var WorkOrdersModule = (function () {
         return '<tr>' +
           '<td><span style="font-weight:700;color:var(--accent-cyan);">' + Utils.escapeHtml(wo.number) + '</span></td>' +
           '<td>' + Utils.formatDate(wo.date) + '</td>' +
+          '<td>' + Utils.maintenanceTypeBadge(wo.maintenanceType || (wo.isPreventive ? 'preventivo' : 'correctivo')) + '</td>' +
           '<td>' + VehiclesModule.getVehicleLabel(wo.vehicleId, wo.vehiclePlate, wo.vehicleName) + '</td>' +
           '<td style="max-width:180px;"><div class="truncate">' + Utils.escapeHtml(wo.description) + '</div></td>' +
           '<td>' + Utils.priorityBadge(wo.priority) + '</td>' +
@@ -189,6 +191,7 @@ var WorkOrdersModule = (function () {
       wizData.routineId = prefillData.routineId || null;
       wizData.routineName = prefillData.routineName || null;
       wizData.isPreventive = prefillData.isPreventive || false;
+      wizData.maintenanceType = prefillData.isPreventive ? 'preventivo' : (prefillData.maintenanceType || 'correctivo');
       if (prefillData.priority) wizData.priority = prefillData.priority;
       if (prefillData.routineName) {
         wizData.description = 'Mantenimiento Preventivo: ' + prefillData.routineName;
@@ -304,6 +307,17 @@ var WorkOrdersModule = (function () {
         '<option value="media"' + (!wizData.priority || wizData.priority === 'media' ? ' selected' : '') + '>🟡 Media</option>' +
         '<option value="baja"' + (wizData.priority === 'baja' ? ' selected' : '') + '>🟢 Baja</option>' +
         '</select></div>' +
+        '<div class="form-group"><label>Tipo de Mantenimiento *</label>' +
+        (wizData.maintenanceType === 'preventivo'
+          ? '<div style="padding:8px 12px;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+            '<span class="badge badge-amber">📅 Preventivo</span>' +
+            '<span class="text-xs text-muted">Pre-asignado desde alerta de rutina</span>' +
+            '</div>'
+          : '<select class="form-select" id="wf-maint-type">' +
+            '<option value="correctivo"' + (!wizData.maintenanceType || wizData.maintenanceType === 'correctivo' ? ' selected' : '') + '>🛠️ Correctivo (Reparación)</option>' +
+            '<option value="preventivo"' + (wizData.maintenanceType === 'preventivo' ? ' selected' : '') + '>📅 Preventivo (Programado)</option>' +
+            '</select>') +
+        '</div>' +
         '<div class="form-group"><label>Técnico Asignado</label><select class="form-select" id="wf-tech">' +
         '<option value="">Sin asignar</option>' +
         DB.getAll('employees').filter(function (e) { return e.active && e.isTechnician; }).map(function (e) {
@@ -316,6 +330,7 @@ var WorkOrdersModule = (function () {
         Object.keys(Utils.OT_STATUS).filter(function(k){ return k !== 'completada'; }).map(function (k) { return '<option value="' + k + '"' + ((!wizData.status && k === 'emitida') || wizData.status === k ? ' selected' : '') + '>' + Utils.OT_STATUS[k].label + '</option>'; }).join('') +
         '</select></div>' +
         '</div>' +
+
         '<div class="form-group span-2"><label>Descripción del trabajo *</label>' +
         '<textarea class="form-textarea" id="wf-desc" rows="4" placeholder="Describe detalladamente el trabajo a realizar...">' + Utils.escapeHtml(wizData.description || '') + '</textarea>' +
         '</div>' +
@@ -341,6 +356,10 @@ var WorkOrdersModule = (function () {
         }
 
         wizData.priority = document.getElementById('wf-prio').value;
+        // Leer tipo de mantenimiento: si ya era preventivo (bloqueado), mantenerlo;
+        // si hay selector activo, leer su valor
+        var maintTypeEl = document.getElementById('wf-maint-type');
+        if (maintTypeEl) wizData.maintenanceType = maintTypeEl.value;
         wizData.assignedTo = document.getElementById('wf-tech').value || null;
         wizData.status = document.getElementById('wf-status').value;
         wizData.description = desc;
@@ -428,8 +447,9 @@ var WorkOrdersModule = (function () {
       laborCost: 0, externalCost: 0, totalCost: 0,
       closedAt: null,
       createdAt: Utils.todayISO(),
-      // ── Campos de Mantenimiento Preventivo ──
-      isPreventive: wizData.isPreventive || false,
+      // ── Tipo de Mantenimiento ──
+      maintenanceType: wizData.maintenanceType || 'correctivo',
+      isPreventive: (wizData.maintenanceType === 'preventivo') || (wizData.isPreventive || false),
       routineId: wizData.routineId || null,
       routineName: wizData.routineName || null
     };
@@ -747,12 +767,15 @@ var WorkOrdersModule = (function () {
     var emps = DB.getAll('employees');
     var eMap = {}; emps.forEach(function (e) { eMap[e.id] = e.name; });
     Utils.exportExcel('ordenes_trabajo_' + Utils.todayISO() + '.xlsx', 'Reporte General de Órdenes de Trabajo',
-      ['Número', 'Fecha', 'Vehículo (Placa)', 'Descripción', 'Prioridad', 'Estado', 'Técnico', 'Materiales', 'Creada por', 'Cerrada'],
+      ['Número', 'Fecha', 'Tipo Mantenimiento', 'Vehículo (Placa)', 'Descripción', 'Prioridad', 'Estado', 'Técnico', 'Materiales', 'Creada por', 'Cerrada', 'Costo Total'],
       wos.map(function (w) {
-        return [w.number, w.date, w.vehiclePlate || 'Sin vehículo', w.description, w.priority,
+        var tipo = w.maintenanceType
+          ? (Utils.MAINTENANCE_TYPES[w.maintenanceType] || { label: w.maintenanceType }).label
+          : (w.isPreventive ? 'Preventivo' : 'Correctivo');
+        return [w.number, w.date, tipo, w.vehiclePlate || 'Sin vehículo', w.description, w.priority,
         Utils.OT_STATUS[w.status] ? Utils.OT_STATUS[w.status].label : w.status,
         eMap[w.assignedTo] || 'Sin asignar', (w.materials || []).length,
-        w.requesterName || '', w.closedAt || ''];
+        w.requesterName || '', w.closedAt || '', w.totalCost || 0];
       })
     );
     Utils.toast('Órdenes de trabajo exportadas a Excel.', 'success');

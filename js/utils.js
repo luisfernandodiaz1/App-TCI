@@ -223,6 +223,17 @@ var Utils = (function () {
     return '<span class="badge ' + p.badge + '"><span class="priority-dot ' + p.dot + '"></span>' + p.label + '</span>';
   }
 
+  // ── Maintenance Type config ──────────────────────────────────────
+  var MAINTENANCE_TYPES = {
+    preventivo: { label: 'Preventivo', badge: 'badge-amber', icon: '📅' },
+    correctivo: { label: 'Correctivo', badge: 'badge-blue',  icon: '🛠️' }
+  };
+
+  function maintenanceTypeBadge(type) {
+    var mt = MAINTENANCE_TYPES[type] || { label: type || 'Correctivo', badge: 'badge-blue', icon: '🛠️' };
+    return '<span class="badge ' + mt.badge + '">' + mt.icon + ' ' + mt.label + '</span>';
+  }
+
   // ── Print OT ───────────────────────────────────────────────
   function printOT(wo) {
     var settings = DB.getSettings();
@@ -421,6 +432,7 @@ var Utils = (function () {
     stockBadge: stockBadge,
     otStatusBadge: otStatusBadge,
     priorityBadge: priorityBadge,
+    maintenanceTypeBadge: maintenanceTypeBadge,
     printOT: printOT,
     drawBarChart: drawBarChart,
     fmtNum: fmtNum,
@@ -428,6 +440,7 @@ var Utils = (function () {
     debounce: debounce,
     afterRender: afterRender,
     OT_STATUS: OT_STATUS,
-    PRIORITY_CFG: PRIORITY_CFG
+    PRIORITY_CFG: PRIORITY_CFG,
+    MAINTENANCE_TYPES: MAINTENANCE_TYPES
   };
 })();
