@@ -585,9 +585,13 @@ var App = (function () {
     }, true);
   }
 
+  function loadMore(col) {
+    DB.loadMore(col);
+  }
+
   function go(section) { navigate(section); }
 
-  return { init: init, go: go, switchUser: switchUser, showUserSwitcher: showUserSwitcher, showUserModal: showUserModal, deleteUser: deleteUser, updateBadges: updateBadges };
+  return { init: init, go: go, switchUser: switchUser, showUserSwitcher: showUserSwitcher, showUserModal: showUserModal, deleteUser: deleteUser, updateBadges: updateBadges, loadMore: loadMore, refreshCurrentSection: function() { navigate(currentSection); } };
 })();
 
 // Boot

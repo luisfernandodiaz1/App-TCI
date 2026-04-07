@@ -673,7 +673,10 @@ var ReportsModule = (function () {
     var headers = ['Tipo', 'Número/Ref', 'Fecha', 'Vehículo', 'Descripción', 'Técnico', 'Horas Trab.', 'Costo Repuestos', 'Costo M.O.', 'Costo Ext.', 'Costo Total', 'Estado', 'Notas'];
     var rows = wos.map(function (w) {
       var mat = w.materialBase !== undefined ? w.materialBase : (w.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
-      return ['OT', w.number, w.date, w.vehiclePlate || '—', w.description, eMap[w.assignedTo] || '—', w.laborHours || 0, mat, w.laborCost || 0, w.externalCost || 0, w.totalCost || 0, Utils.OT_STATUS[w.status] ? Utils.OT_STATUS[w.status].label : w.status, w.notes || ''];
+      var equipoStr = (w.laborEntries || []).length
+        ? w.laborEntries.map(function(e){ return e.name; }).join(', ')
+        : (eMap[w.assignedTo] || '—');
+      return ['OT', w.number, w.date, w.vehiclePlate || '—', w.description, equipoStr, w.laborHours || 0, mat, w.laborCost || 0, w.externalCost || 0, w.totalCost || 0, Utils.OT_STATUS[w.status] ? Utils.OT_STATUS[w.status].label : w.status, w.notes || ''];
     });
     logs.forEach(function (l) { rows.push(['Mtto. Exprés', l.routineName, l.date, l.vehiclePlate || '—', 'Registro Directo', eMap[l.userId] || '—', 0, l.matCost || 0, l.laborCost || 0, l.otherCost || 0, l.totalCost, 'Completada', l.notes || '']); });
     rows.sort(function (a, b) { return b[2].localeCompare(a[2]); });

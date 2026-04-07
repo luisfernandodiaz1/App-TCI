@@ -31,6 +31,7 @@ var DB = (function () {
   };
   
   var _listeners = [];
+  var _lastDocs = {}; // Punteros para paginación (V2.2)
   var _isCloudReady = false;
 
   // ── 1. INITIALIZATION ──────────────────────────────────────
@@ -81,11 +82,8 @@ var DB = (function () {
     }
 
     _isCloudReady = true;
-    var collections = [
-      'categories', 'items', 'movements', 'workOrders', 
-      'vehicles', 'preventiveRoutines', 'fuelLogs', 
-      'vehicleDocuments', 'users', 'employees', 'positions'
-    ];
+    var lightCols = ['categories', 'items', 'vehicles', 'preventiveRoutines', 'fuelLogs', 'vehicleDocuments', 'users', 'employees', 'positions'];
+    var heavyCols = ['movements', 'workOrders'];
 
     // Escuchar Settings
     window.firebase_db.collection('settings').doc('config').onSnapshot(function(doc) {
@@ -95,22 +93,63 @@ var DB = (function () {
       }
     });
 
-    // Escuchar Colecciones
-    collections.forEach(function(col) {
+    // Carga Completa para Colecciones Ligeras
+    lightCols.forEach(function(col) {
       window.firebase_db.collection(col).onSnapshot(function(snapshot) {
-        if (snapshot.metadata.hasPendingWrites) return; // Ignorar mis propios ecos inmediatos
-        
-        var remoteData = snapshot.docs.map(function(doc) { 
-          return Object.assign({ id: doc.id }, doc.data()); 
-        });
-        
-        if (remoteData.length > 0) {
-          _data[col] = remoteData;
-          saveLocal();
-          notify();
-        }
+        if (snapshot.metadata.hasPendingWrites) return;
+        var remoteData = snapshot.docs.map(function(doc) { return Object.assign({ id: doc.id }, doc.data()); });
+        if (remoteData.length > 0) { _data[col] = remoteData; saveLocal(); notify(); }
       });
     });
+
+    // Carga Paginada para Colecciones Pesadas (V2.2)
+    heavyCols.forEach(function(col) {
+      window.firebase_db.collection(col)
+        .orderBy('date', 'desc')
+        .limit(30)
+        .onSnapshot(function(snapshot) {
+          if (snapshot.metadata.hasPendingWrites) return;
+          var remoteData = snapshot.docs.map(function(doc) { return Object.assign({ id: doc.id }, doc.data()); });
+          if (remoteData.length > 0) {
+            _data[col] = remoteData;
+            _lastDocs[col] = snapshot.docs[snapshot.docs.length - 1]; // Guardar puntero
+            saveLocal();
+            notify();
+          }
+        });
+    });
+  }
+
+  async function loadMore(col) {
+    if (!_isCloudReady || !_lastDocs[col]) return;
+    try {
+      Utils.toast('Cargando registros anteriores...', 'info', 2000);
+      const snap = await window.firebase_db.collection(col)
+        .orderBy('date', 'desc')
+        .startAfter(_lastDocs[col])
+        .limit(50)
+        .get();
+
+      if (snap.empty) {
+        _lastDocs[col] = null;
+        Utils.toast('No hay más registros antiguos.', 'success');
+        return;
+      }
+
+      const newRecords = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+      
+      // Combinar sin duplicados
+      newRecords.forEach(function(r) {
+        if (!_data[col].find(function(x) { return x.id === r.id; })) {
+          _data[col].push(r);
+        }
+      });
+
+      _lastDocs[col] = snap.docs[snap.docs.length - 1];
+      notify();
+    } catch (e) {
+      console.error('Error loadMore:', e);
+    }
   }
 
   function notify() {
@@ -150,23 +189,29 @@ var DB = (function () {
 
     // 2. Cloud (Background)
     if (_isCloudReady) {
-      window.firebase_db.collection(collection).doc(record.id).set(record).catch(console.error);
-    }
-    return record.id;
-  }
+      window.firebase_db.collection(collection).doc(record.id).set(record).catch(function(err) {
+        console.error('Error sincronización Cloud:', err);
+        Utils.toast('⚠️ Error de conexión: El cambio se guardó solo localmente.', 'warning');
+        });
+        }
+        return record.id;
+        }
 
-  function update(collection, id, changes) {
-    var idx = (_data[collection] || []).findIndex(function(r) { return r.id === id; });
-    if (idx === -1) return false;
+        function update(collection, id, changes) {
+        var idx = (_data[collection] || []).findIndex(function(r) { return r.id === id; });
+        if (idx === -1) return false;
 
-    // 1. Local
-    Object.assign(_data[collection][idx], changes);
-    saveLocal();
+        // 1. Local
+        Object.assign(_data[collection][idx], changes);
+        saveLocal();
 
-    // 2. Cloud
-    if (_isCloudReady) {
-      window.firebase_db.collection(collection).doc(id).update(changes).catch(console.error);
-    }
+        // 2. Cloud
+        if (_isCloudReady) {
+        window.firebase_db.collection(collection).doc(id).update(changes).catch(function(err) {
+        console.error('Error sincronización Cloud:', err);
+        Utils.toast('⚠️ Error de conexión: Actualización solo local.', 'warning');
+        });
+        }
     return true;
   }
 
@@ -316,6 +361,7 @@ var DB = (function () {
     onReady: onReady,
     on: onReady, // ALIAS RESTAURADO (V2.1)
     uploadToCloud: uploadToCloud,
+    loadMore: loadMore,
     transaction: transaction,
     isCloudReady: function () { return _isCloudReady; }
   };

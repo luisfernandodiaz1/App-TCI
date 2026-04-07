@@ -375,7 +375,7 @@ var InventoryModule = (function () {
         movs.map(function (m) {
           return '<tr>' +
             '<td>' + Utils.formatDate(m.date) + '</td>' +
-            '<td>' + (m.type === 'entrada' ? '<span class="badge badge-green">⬆️ Entrada</span>' : (m.type === 'salida' ? '<span class="badge badge-red">⬇️ Salida</span>' : '<span class="badge badge-blue">🔄 Ajuste</span>')) + '</td>' +
+            '<td>' + (m.type === 'entrada' ? '<span class="badge badge-amber">⬆️ Compra</span>' : (m.type === 'salida' ? '<span class="badge badge-green">⬇️ Consumo</span>' : '<span class="badge badge-blue">🔄 Ajuste</span>')) + '</td>' +
             '<td><strong>' + Utils.fmtNum(m.qty) + '</strong></td>' +
             '<td>$ ' + Utils.fmtNum(m.unitCost || 0) + '</td>' +
             '<td>$ ' + Utils.fmtNum(m.totalCost || 0) + '</td>' +
@@ -458,7 +458,7 @@ var InventoryModule = (function () {
       html += '<div class="table-wrapper"><table><thead><tr>' +
         '<th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Costo U.</th><th>Costo Total</th><th>Ref.</th><th>Notas</th><th>Por</th>' +
         '</tr></thead><tbody>' +
-        movements.slice(0, 150).map(function (m) {
+        movements.map(function (m) {
           return '<tr><td><strong>' + Utils.formatDate(m.date) + '</strong></td><td><span style="font-weight:700;">' + Utils.escapeHtml(iMap[m.itemId] || '—') + '</span></td>' +
             '<td>' + (m.type === 'entrada' ? '<span class="badge badge-amber">⬆️ Compra</span>' : (m.type === 'salida' ? '<span class="badge badge-green">⬇️ Consumo</span>' : '<span class="badge badge-blue">🔄 Ajuste</span>')) + '</td>' +
             '<td><strong>' + Utils.fmtNum(m.qty) + '</strong></td>' +
@@ -467,7 +467,11 @@ var InventoryModule = (function () {
             '<td>' + Utils.escapeHtml(m.reference || '—') + '</td>' +
             '<td class="text-secondary text-sm">' + Utils.escapeHtml(m.notes || '—') + '</td><td class="text-sm">' + Utils.escapeHtml(uMap[m.userId] || '—') + '</td></tr>';
         }).join('') +
-        '</tbody></table></div><div class="pagination"><span>' + movements.length + ' movimientos filtrados (máx 150 en visualización)</span></div></div>';
+        '</tbody></table></div>' +
+        '<div class="p-4 text-center">' +
+        '<button class="btn btn-ghost" onclick="App.loadMore(\'movements\')">🔄 Cargar registros anteriores</button>' +
+        '</div>' +
+        '<div class="pagination"><span>' + movements.length + ' movimientos cargados</span></div></div>';
     }
 
     html += '</div>';

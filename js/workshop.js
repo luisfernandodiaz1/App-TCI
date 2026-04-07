@@ -354,7 +354,7 @@ var WorkshopModule = (function () {
       '<option value="">Buscar repuesto...</option>' +
       DB.getAll('items').map(function (i) { return '<option value="' + i.id + '">' + Utils.escapeHtml(i.code + ' — ' + i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
       '</select>' +
-      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +
+      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +        
       '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">➕ Añadir</button>' +
       '</div></div>' : '') +
       '<div id="dlv-mats">' + buildMatHtml() + '</div>' +
@@ -502,13 +502,14 @@ var WorkshopModule = (function () {
           var notes = document.getElementById('dlv-notes') ? document.getElementById('dlv-notes').value.trim() : '';
           var settings4 = DB.getSettings();
 
+          var totalLaborHours = (finData.laborEntries || []).reduce(function(acc, e){ return acc + (e.hours || 0); }, 0);
           DB.update('workOrders', woId, {
             status: 'completada',
             closedAt: Utils.todayISO(),
             notes: notes,
             laborCost: finData.labor,
             externalCost: finData.external,
-            laborHours: finData.hours || 0,
+            laborHours: totalLaborHours,  // Suma de horas de todos los mecánicos
             materialBase: finData.matBase,
             totalCost: finData.total,
             laborEntries: finData.laborEntries || []  // Array multi-mecánico
