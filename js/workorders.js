@@ -454,6 +454,11 @@ var WorkOrdersModule = (function () {
       routineName: wizData.routineName || null
     };
     DB.create('workOrders', data);
+    // ── Registrar primer log de actividad ──
+    var newWO = DB.getAll('workOrders').find(function(w){ return w.number === data.number; });
+    if (newWO) {
+      addWOLog(newWO.id, 'OT Creada. Técnico responsable: ' + (DB.getById('employees', data.assignedTo) ? DB.getById('employees', data.assignedTo).name : 'Sin asignar'), settings.activeUserId);
+    }
     var msg = data.isPreventive
       ? '✅ OT Preventiva ' + data.number + ' creada. Ve a Vista Taller para gestionarla.'
       : '✅ OT ' + data.number + ' creada exitosamente.';
@@ -472,6 +477,22 @@ var WorkOrdersModule = (function () {
       lastPerformedDate: finalDate
     });
     console.log('🔄 Rutina sincronizada: ' + routine.name + ' | Horas: ' + finalHours + ' | Fecha: ' + finalDate);
+  }
+
+  // ── Activity Log (Muro de Actividad) ─────────────────────────────
+  function addWOLog(woId, action, userId) {
+    var wo = DB.getById('workOrders', woId);
+    if (!wo) return;
+    var user = DB.getById('users', userId) || DB.getById('employees', userId);
+    var userName = user ? user.name : 'Sistema';
+    var log = wo.activityLog ? wo.activityLog.slice() : [];
+    log.push({
+      ts: new Date().toISOString(),
+      userId: userId || null,
+      userName: userName,
+      action: action
+    });
+    DB.update('workOrders', woId, { activityLog: log });
   }
 
   // ── Expose for inline onclick ──────────────────────────────
@@ -615,6 +636,45 @@ var WorkOrdersModule = (function () {
       '<h4 style="margin-bottom:8px;">Materiales</h4>' + matHtml +
       (wo.notes ? '<div class="divider"></div><h4 style="margin-bottom:8px;">Observaciones</h4><p class="text-secondary">' + Utils.escapeHtml(wo.notes) + '</p>' : '') +
       financialHtml +
+      // ── MURO DE ACTIVIDAD ──
+      (function() {
+        var logs = wo.activityLog || [];
+        if (!logs.length) return '';
+        var feedHtml = '<div class="divider"></div>' +
+          '<h4 style="margin-bottom:12px;">📋 Muro de Actividad</h4>' +
+          '<div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;">';
+        logs.slice().reverse().forEach(function(log) {
+          var d = new Date(log.ts);
+          var timeStr = d.toLocaleString('es-CO', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+          feedHtml += '<div style="display:flex;gap:10px;align-items:flex-start;">' +
+            '<div style="width:32px;height:32px;border-radius:50%;background:var(--accent-primary);color:#fff;font-size:0.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+            Utils.escapeHtml((log.userName||'?').charAt(0).toUpperCase()) + '</div>' +
+            '<div style="flex:1;">' +
+            '<div style="font-size:0.8rem;font-weight:600;">' + Utils.escapeHtml(log.userName || 'Sistema') + '</div>' +
+            '<div style="font-size:0.78rem;color:var(--text-secondary);">' + Utils.escapeHtml(log.action) + '</div>' +
+            '<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">' + timeStr + '</div>' +
+            '</div>' +
+            '</div>';
+        });
+        feedHtml += '</div>';
+        return feedHtml;
+      })() +
+      // ── Equipo que participó (al cerrar) ──
+      (function() {
+        var entries = wo.laborEntries || [];
+        if (!entries.length || wo.status !== 'completada') return '';
+        var teamHtml = '<div class="divider"></div><h4 style="margin-bottom:12px;">👥 Equipo de Trabajo</h4>' +
+          '<div style="display:flex;flex-direction:column;gap:8px;">';
+        entries.forEach(function(e) {
+          teamHtml += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg-elevated);border-radius:8px;">' +
+            '<div><div style="font-weight:600;font-size:0.875rem;">' + Utils.escapeHtml(e.name) + '</div>' +
+            '<div class="text-xs text-muted">' + e.hours + ' hrs trabajadas</div></div>' +
+            '<div style="font-weight:700;color:var(--color-success);">$ ' + Utils.fmtNum(e.cost) + '</div>' +
+            '</div>';
+        });
+        teamHtml += '</div>';
+        return teamHtml;
+      })() +
       '</div>' +
       '</div></div>';
 
@@ -798,6 +858,7 @@ var WorkOrdersModule = (function () {
     printWO: printWO,
     _rmMat: _rmMat,
     updateWizKm: updateWizKm,
-    syncRoutineOnClose: syncRoutineOnClose
+    syncRoutineOnClose: syncRoutineOnClose,
+    addWOLog: addWOLog
   };
 })();

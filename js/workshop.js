@@ -349,13 +349,17 @@ var WorkshopModule = (function () {
       (!isCompleted ? 
       '<div class="form-group" style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;">' +
       '<label>➕ Añadir Repuesto Extra a la OT</label>' +
-      '<div class="flex gap-2" style="margin-top:4px;">' +
-      '<select class="form-select" id="dlv-extra-item" style="flex:1;">' +
-      '<option value="">Buscar repuesto en inventario...</option>' +
+      '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:6px;margin-top:4px;align-items:center;">' +
+      '<select class="form-select" id="dlv-extra-item">' +
+      '<option value="">Buscar repuesto...</option>' +
       DB.getAll('items').map(function (i) { return '<option value="' + i.id + '">' + Utils.escapeHtml(i.code + ' — ' + i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
       '</select>' +
-      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +
-      '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">+ Añadir a OT</button>' +
+      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:70px;" placeholder="Cant.">' +
+      '<select class="form-select" id="dlv-extra-mech" style="max-width:160px;">' +
+      '<option value="">-- Mecánico --</option>' +
+      DB.getAll('employees').filter(function(e){ return e.active && e.isTechnician; }).map(function(e){ return '<option value="' + e.id + '">' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
+      '</select>' +
+      '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">+ Añadir</button>' +
       '</div></div>' : '') +
       '<div id="dlv-mats">' + buildMatHtml() + '</div>' +
       '<div class="divider"></div>' +
@@ -383,10 +387,14 @@ var WorkshopModule = (function () {
         btnExtra.onclick = function() {
           var sel = document.getElementById('dlv-extra-item');
           var qty = parseFloat(document.getElementById('dlv-extra-qty').value) || 0;
+          var mechSel = document.getElementById('dlv-extra-mech');
+          var mechId = mechSel ? mechSel.value : null;
           var iId = sel.value;
+
           if (!iId) { Utils.toast('Selecciona un repuesto.', 'warning'); return; }
           if (qty <= 0) { Utils.toast('La cantidad debe ser mayor a 0.', 'error'); return; }
-          
+          if (!mechId) { Utils.toast('⚠️ Indica qué mecánico solicita este repuesto.', 'warning'); return; }
+
           var item = DB.getById('items', iId);
           if (!item) return;
 
@@ -400,11 +408,23 @@ var WorkshopModule = (function () {
               unit: item.unit || 'unidad',
               qtyRequested: qty,
               qtyDelivered: 0,
-              delivered: false
+              delivered: false,
+              requestedBy: mechId  // Mecánico que solicitó el repuesto
             });
           }
-          
+
           DB.update('workOrders', woId, { materials: wo.materials });
+
+          // Registrar log en el Muro de Actividad
+          var settings2 = DB.getSettings();
+          var mech = DB.getById('employees', mechId);
+          var mechName = mech ? mech.name : 'Desconocido';
+          WorkOrdersModule.addWOLog(
+            woId,
+            mechName + ' solicitó ' + qty + ' ' + item.unit + ' de "' + item.name + '"',
+            settings2.activeUserId
+          );
+
           Utils.toast('Repuesto añadido a la OT.', 'success');
           App.updateBadges();
           close();
@@ -413,7 +433,11 @@ var WorkshopModule = (function () {
       }
 
       document.getElementById('dlv-pause').onclick = function () {
-        DB.update('workOrders', woId, { status: 'esperando_repuestos', notes: document.getElementById('dlv-notes').value.trim() });
+        var notes = document.getElementById('dlv-notes').value.trim();
+        DB.update('workOrders', woId, { status: 'esperando_repuestos', notes: notes });
+        // Registrar log
+        var settings3 = DB.getSettings();
+        WorkOrdersModule.addWOLog(woId, 'OT pausada: Esperando repuestos.' + (notes ? ' Nota: ' + notes : ''), settings3.activeUserId);
         Utils.toast('OT pausada. En espera de repuestos.', 'warning');
         close(); render(); App.updateBadges();
       };
@@ -435,7 +459,8 @@ var WorkshopModule = (function () {
 
         var hasPending = (currentWo.materials || []).some(function (m) { return (m.qtyDelivered || 0) < m.qtyRequested; });
         showFinancialCloseModal(currentWo, hasPending, function (finData) {
-          var notes = document.getElementById('dlv-notes').value.trim();
+          var notes = document.getElementById('dlv-notes') ? document.getElementById('dlv-notes').value.trim() : '';
+          var settings4 = DB.getSettings();
 
           DB.update('workOrders', woId, {
             status: 'completada',
@@ -443,12 +468,21 @@ var WorkshopModule = (function () {
             notes: notes,
             laborCost: finData.labor,
             externalCost: finData.external,
-            laborHours: finData.hours,
+            laborHours: finData.hours || 0,
             materialBase: finData.matBase,
-            totalCost: finData.total
+            totalCost: finData.total,
+            laborEntries: finData.laborEntries || []  // Array multi-mecánico
           });
 
-          // ── FASE 4: Sincronizar rutina si es preventiva ──
+          // Registrar log de cierre con el equipo
+          var teamStr = (finData.laborEntries || []).map(function(e){ return e.name + ' (' + e.hours + 'h)'; }).join(', ');
+          WorkOrdersModule.addWOLog(
+            woId,
+            'OT Cerrada.' + (teamStr ? ' Equipo: ' + teamStr : '') + ' | Total: $' + Utils.fmtNum(finData.total),
+            settings4.activeUserId
+          );
+
+          // ── Sincronizar rutina si es preventiva ──
           var closedWo = DB.getById('workOrders', woId);
           if (closedWo && closedWo.isPreventive) {
             WorkOrdersModule.syncRoutineOnClose(closedWo, finData.finalHours, Utils.todayISO());
@@ -458,6 +492,7 @@ var WorkshopModule = (function () {
           }
           close(); render(); App.updateBadges();
         });
+
       };
     }
   }
@@ -466,42 +501,89 @@ var WorkshopModule = (function () {
     var old = document.getElementById('fin-close-modal'); if (old) old.remove();
 
     var matBaseSum = (wo.materials || []).reduce(function (acc, m) { return Utils.dec.add(acc, m.totalBase || 0); }, 0);
-    var matTotalSum = matBaseSum;
-
     var settings = DB.getSettings();
     var baseHours = settings.monthlyWorkingHours || 220;
 
-    var employee = DB.getById('employees', wo.assignedTo);
-    var salary = employee ? (employee.monthlySalary || 0) : 0;
-    var rate = salary / baseHours;
+    // ── Construir lista inicial de mecánicos desde el activityLog ──
+    var mechMap = {}; // { empId: { id, name, rate, hours } }
 
-    var html = '<div class="modal-overlay" id="fin-close-modal" style="z-index:9999;"><div class="modal">' +
-      '<div class="modal-header"><h3>Cierre de OT: ' + Utils.escapeHtml(wo.number) + '</h3><button class="modal-close" id="fin-close-x">✕</button></div>' +
+    // 1. Agregar el mecánico responsable principal
+    var mainEmp = DB.getById('employees', wo.assignedTo);
+    if (mainEmp) {
+      var mainRate = (mainEmp.monthlySalary || 0) / baseHours;
+      mechMap[mainEmp.id] = { id: mainEmp.id, name: mainEmp.name, rate: mainRate, hours: 0 };
+    }
+
+    // 2. Agregar mecánicos detectados en el activityLog
+    var allEmps = DB.getAll('employees');
+    (wo.activityLog || []).forEach(function(log) {
+      if (log.userId && !mechMap[log.userId]) {
+        var logEmp = allEmps.find(function(e){ return e.id === log.userId; });
+        if (logEmp && logEmp.isTechnician) {
+          var logRate = (logEmp.monthlySalary || 0) / baseHours;
+          mechMap[logEmp.id] = { id: logEmp.id, name: logEmp.name, rate: logRate, hours: 0 };
+        }
+      }
+    });
+
+    // 3. Agregar quien solicitó repuestos extra
+    (wo.materials || []).forEach(function(m) {
+      if (m.requestedBy && !mechMap[m.requestedBy]) {
+        var reqEmp = allEmps.find(function(e){ return e.id === m.requestedBy; });
+        if (reqEmp) {
+          var reqRate = (reqEmp.monthlySalary || 0) / baseHours;
+          mechMap[reqEmp.id] = { id: reqEmp.id, name: reqEmp.name, rate: reqRate, hours: 0 };
+        }
+      }
+    });
+
+    var mechList = Object.values(mechMap); // Array de mecánicos detectados
+
+    function buildMechRows() {
+      if (!mechList.length) return '<p class="text-muted text-sm">No se detectó ningún técnico. Agrega uno manualmente.</p>';
+      return mechList.map(function(m, i) {
+        var rateStr = m.rate > 0 ? '$ ' + Utils.fmtNum(Math.round(m.rate)) + '/hr' : 'Sin sueldo';
+        return '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:8px;background:var(--bg-elevated);border-radius:8px;margin-bottom:6px;" id="mech-row-' + i + '">' +
+          '<div><div style="font-weight:600;font-size:0.875rem;">' + Utils.escapeHtml(m.name) + '</div>' +
+          '<div class="text-xs text-muted">' + rateStr + '</div></div>' +
+          '<div><input type="number" id="mech-hours-' + i + '" min="0" step="0.5" value="0" class="form-input" style="width:80px;" placeholder="Hrs" oninput="WorkshopModule._updateMechCost(' + i + ',' + m.rate + ')"></div>' +
+          '<div id="mech-cost-' + i + '" style="font-weight:700;color:var(--color-success);min-width:80px;text-align:right;">$ 0</div>' +
+          '<button onclick="WorkshopModule._removeMechRow(' + i + ')" style="background:none;border:none;color:var(--color-danger);cursor:pointer;font-size:1rem;">✕</button>' +
+          '</div>';
+      }).join('');
+    }
+
+    var availableTechs = allEmps.filter(function(e){ return e.active && e.isTechnician && !mechMap[e.id]; });
+
+    var html = '<div class="modal-overlay" id="fin-close-modal" style="z-index:9999;"><div class="modal modal-lg">' +
+      '<div class="modal-header"><h3>Cierre Financiero: ' + Utils.escapeHtml(wo.number) + '</h3><button class="modal-close" id="fin-close-x">✕</button></div>' +
       '<div class="modal-body">' +
       (hasPending ? '<div class="alert-banner warning" style="margin-bottom:16px;">⚠️ Hay materiales sin entregar en su totalidad.</div>' : '') +
-      '<div style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;border-left:4px solid var(--accent-primary);">' +
-      '<div style="display:flex;justify-content:space-between;align-items:start;">' +
-      '<div>' +
-      '<div class="text-xs text-muted">MECÁNICO ASIGNADO</div>' +
-      '<div style="font-weight:600;">' + (employee ? Utils.escapeHtml(employee.name) : 'No asignado') + '</div>' +
+      // Horómetro para preventivas
+      (wo.isPreventive ? '<div class="form-group"><label style="color:var(--color-warning);font-weight:700;">📏 Horómetro Final (Horas) * <span style="font-size:0.7rem;font-weight:400;">(Obligatorio para actualizar la rutina)</span></label><input class="form-input" type="number" min="' + (wo.vehicleHours || 0) + '" step="0.1" id="fin-horometro-final" value="' + (wo.vehicleHours || 0) + '"></div>' : '') +
+      // Tabla de mecánicos
+      '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+      '<h4 style="margin:0;">👥 Mano de Obra por Mecánico</h4>' +
+      (availableTechs.length ? '<div style="display:flex;gap:6px;align-items:center;">' +
+        '<select class="form-select" id="fin-add-mech" style="font-size:0.8rem;">' +
+        '<option value="">➕ Agregar otro mecánico...</option>' +
+        availableTechs.map(function(e){ return '<option value="' + e.id + '">' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
+        '</select>' +
+        '<button class="btn btn-primary btn-sm" id="fin-add-mech-btn">Agregar</button>' +
+        '</div>' : '') +
       '</div>' +
-      '<div style="text-align:right;">' +
-      '<div class="text-xs text-muted">SUELDO: $ ' + Utils.fmtNum(salary) + '</div>' +
-      '<div class="text-xs text-muted" title="Calculado sobre ' + baseHours + 'h mensuales">TARIFA HORA: $ ' + Utils.fmtNum(Math.round(rate)) + '</div>' +
+      '<div id="fin-mech-list">' + buildMechRows() + '</div>' +
       '</div>' +
-      '</div>' +
-      '</div>' +
+      // Subtotales
       '<div class="form-grid">' +
       '<div class="form-group"><label>Subtotal Repuestos</label><input class="form-input" type="text" disabled value="$ ' + Utils.fmtNum(matBaseSum) + '"></div>' +
-      (wo.isPreventive ? '<div class="form-group"><label style="color:var(--color-warning);font-weight:700;">📏 Horómetro Final (Horas) * <span style="font-size:0.7rem;font-weight:400;">(Obligatorio para actualizar la rutina)</span></label><input class="form-input" type="number" min="' + (wo.vehicleHours || 0) + '" step="0.1" id="fin-horometro-final" value="' + (wo.vehicleHours || 0) + '"></div>' : '') +
-      '<div class="form-group"><label>Horas Trabajadas</label><input class="form-input" type="number" min="0" step="0.5" id="fin-hours" value="0"></div>' +
-      '<div class="form-group"><label>Costo Mano de Obra ($)</label><input class="form-input" type="number" min="0" id="fin-labor" value="0"></div>' +
-      '<div class="form-group"><label>Servicios Externos ($)</label><input class="form-input" type="number" min="0" id="fin-ext" value="0"></div>' +
+      '<div class="form-group"><label>Servicios Externos ($)</label><input class="form-input" type="number" min="0" id="fin-ext" value="0" oninput="WorkshopModule._updateFinTotal()"></div>' +
       '</div>' +
-
-      '<div id="fin-total-pre" style="margin-top:16px;padding:12px;background:var(--bg-elevated);border-radius:8px;text-align:right;">' +
+      '<div id="fin-total-pre" style="margin-top:16px;padding:16px;background:var(--bg-elevated);border-radius:8px;">' +
       '<div class="text-xs text-muted">RESUMEN FINAL:</div>' +
-      '<div style="font-weight:700;font-size:1.2rem;color:var(--color-success);margin-top:4px;">TOTAL ESTIMADO: $ ' + Utils.fmtNum(matTotalSum) + '</div>' +
+      '<div id="fin-total-breakdown" style="margin-top:8px;font-size:0.82rem;color:var(--text-secondary);"></div>' +
+      '<div id="fin-total-amount" style="font-weight:800;font-size:1.3rem;color:var(--color-success);margin-top:6px;">TOTAL: $ ' + Utils.fmtNum(matBaseSum) + '</div>' +
       '</div>' +
       '</div>' +
       '<div class="modal-footer"><button class="btn btn-secondary" id="fin-cancel">Cancelar</button><button class="btn btn-success" id="fin-confirm">✅ Guardar y Cerrar OT</button></div>' +
@@ -509,73 +591,101 @@ var WorkshopModule = (function () {
 
     document.body.insertAdjacentHTML('beforeend', html);
     var ov = document.getElementById('fin-close-modal');
-    var inputHours = document.getElementById('fin-hours');
-    var inputLabor = document.getElementById('fin-labor');
-    var inputExt = document.getElementById('fin-ext');
-    var totalPre = document.getElementById('fin-total-pre');
 
-    var isManualLabor = false;
-    function updateLive(source) {
-      if (source === 'labor') isManualLabor = true;
+    // Guardar mechList en el módulo para acceso desde _removeMechRow y _updateMechCost
+    WorkshopModule._mechList = mechList;
+    WorkshopModule._matBaseSum = matBaseSum;
+    WorkshopModule._baseHours = baseHours;
 
-      var h = parseFloat(inputHours.value) || 0;
-      var e = parseFloat(inputExt.value) || 0;
-      var l = parseFloat(inputLabor.value) || 0;
-
-      // Solo autocalcular si NO es manual o si el origen es el cambio de horas y l es 0
-      if (source === 'hours' && !isManualLabor) {
-        l = Utils.dec.round(Utils.dec.mul(h, rate), 0);
-        inputLabor.value = l;
-      }
-
-      var total = Utils.dec.add(matBaseSum, Utils.dec.add(l, e));
-
-      totalPre.innerHTML =
-        '<div class="text-xs text-muted">RESUMEN FINAL:</div>' +
-        '<div style="font-weight:700;font-size:1.2rem;color:var(--color-success);margin-top:4px;">TOTAL: $ ' + Utils.fmtNum(total) + '</div>' +
-        (isManualLabor ? '<div style="font-size:0.65rem;color:var(--color-warning);margin-top:4px;">⚠️ Costo de mano de obra fijado manualmente</div>' : '');
+    // Agregar mecánico extra
+    var addMechBtn = document.getElementById('fin-add-mech-btn');
+    if (addMechBtn) {
+      addMechBtn.onclick = function() {
+        var selEl = document.getElementById('fin-add-mech');
+        var empId = selEl ? selEl.value : '';
+        if (!empId) { Utils.toast('Selecciona un mecánico.', 'warning'); return; }
+        var emp = DB.getById('employees', empId);
+        if (!emp) return;
+        mechList.push({ id: emp.id, name: emp.name, rate: (emp.monthlySalary || 0) / (settings.monthlyWorkingHours || 220), hours: 0 });
+        WorkshopModule._mechList = mechList;
+        document.getElementById('fin-mech-list').innerHTML = buildMechRows();
+        WorkshopModule._updateFinTotal();
+      };
     }
 
-    inputHours.oninput = function() { updateLive('hours'); };
-    inputLabor.oninput = function() { updateLive('labor'); };
-    inputExt.oninput = function() { updateLive('ext'); };
+    WorkshopModule._updateFinTotal = function() {
+      var totalLabor = 0;
+      var breakdown = '';
+      mechList.forEach(function(m, i) {
+        var hEl = document.getElementById('mech-hours-' + i);
+        var h = hEl ? (parseFloat(hEl.value) || 0) : 0;
+        var cost = Utils.dec.round(Utils.dec.mul(h, m.rate), 0);
+        totalLabor = Utils.dec.add(totalLabor, cost);
+        breakdown += '<span style="margin-right:12px;">' + Utils.escapeHtml(m.name) + ': ' + h + 'h = $ ' + Utils.fmtNum(cost) + '</span>';
+      });
+      var ext = parseFloat((document.getElementById('fin-ext') || {}).value) || 0;
+      var total = Utils.dec.add(matBaseSum, Utils.dec.add(totalLabor, ext));
+      var breakEl = document.getElementById('fin-total-breakdown');
+      var amtEl = document.getElementById('fin-total-amount');
+      if (breakEl) breakEl.innerHTML = breakdown;
+      if (amtEl) amtEl.textContent = 'TOTAL: $ ' + Utils.fmtNum(total);
+    };
+
+    WorkshopModule._updateMechCost = function(i, rate) {
+      var hEl = document.getElementById('mech-hours-' + i);
+      var h = hEl ? (parseFloat(hEl.value) || 0) : 0;
+      var cost = Utils.dec.round(Utils.dec.mul(h, rate), 0);
+      var costEl = document.getElementById('mech-cost-' + i);
+      if (costEl) costEl.textContent = '$ ' + Utils.fmtNum(cost);
+      WorkshopModule._updateFinTotal();
+    };
+
+    WorkshopModule._removeMechRow = function(i) {
+      mechList.splice(i, 1);
+      WorkshopModule._mechList = mechList;
+      document.getElementById('fin-mech-list').innerHTML = buildMechRows();
+      WorkshopModule._updateFinTotal();
+    };
 
     function closeFin() { ov.remove(); }
     document.getElementById('fin-close-x').onclick = closeFin;
     document.getElementById('fin-cancel').onclick = closeFin;
 
     document.getElementById('fin-confirm').onclick = function () {
-      var h = parseFloat(document.getElementById('fin-hours').value) || 0;
-      var l = parseInt(document.getElementById('fin-labor').value) || 0;
-      var e = parseInt(document.getElementById('fin-ext').value) || 0;
       var horoFinalEl = document.getElementById('fin-horometro-final');
       var horoFinal = horoFinalEl ? (parseFloat(horoFinalEl.value) || 0) : 0;
+      var ext = parseInt((document.getElementById('fin-ext') || {}).value) || 0;
 
-      if (h < 0 || l < 0 || e < 0) {
-        Utils.toast('Los costos y las horas no pueden ser negativos.', 'error');
-        return;
-      }
+      if (ext < 0) { Utils.toast('Los costos no pueden ser negativos.', 'error'); return; }
 
-      // Poka-Yoke para OTs preventivas: el horómetro final es obligatorio
       if (wo.isPreventive && horoFinal <= (wo.vehicleHours || 0)) {
         Utils.toast('⚠️ Para OTs preventivas, el Horómetro Final debe ser mayor al inicial (' + (wo.vehicleHours || 0) + ' hrs).', 'warning');
         return;
       }
 
-      if (employee && h === 0 && l === 0) {
-        if (!window.confirm('Hay un mecánico asignado. ¿Finalizar con 0 horas de mano de obra?')) return;
-      }
-      
-      var total = Utils.dec.add(matBaseSum, Utils.dec.add(l, e));
+      // Recolectar entradas de labor
+      var laborEntries = [];
+      var totalLabor = 0;
+      mechList.forEach(function(m, i) {
+        var hEl = document.getElementById('mech-hours-' + i);
+        var h = parseFloat(hEl ? hEl.value : 0) || 0;
+        var cost = Utils.dec.round(Utils.dec.mul(h, m.rate), 0);
+        laborEntries.push({ employeeId: m.id, name: m.name, hours: h, cost: cost });
+        totalLabor = Utils.dec.add(totalLabor, cost);
+      });
+
+      if (totalLabor === 0 && !window.confirm('¿Seguro que el costo de mano de obra es $0?')) return;
+
+      var total = Utils.dec.add(matBaseSum, Utils.dec.add(totalLabor, ext));
 
       closeFin();
       onConfirm({
-        hours: h,
-        labor: l,
-        external: e,
+        laborEntries: laborEntries,
+        labor: totalLabor,
+        external: ext,
         matBase: matBaseSum,
         total: total,
-        finalHours: horoFinal  // Horómetro final para sincronizar la rutina
+        finalHours: horoFinal
       });
     };
   }
@@ -586,5 +696,15 @@ var WorkshopModule = (function () {
     render();
   }
 
-  return { render: render, acceptOT: acceptOT, openDeliverModal: openDeliverModal, _doAction: _doAction, resetFilters: resetFilters };
+  return {
+    render: render,
+    acceptOT: acceptOT,
+    openDeliverModal: openDeliverModal,
+    _doAction: _doAction,
+    resetFilters: resetFilters,
+    _updateMechCost: function(i, rate) { if (WorkshopModule._updateMechCost) WorkshopModule._updateMechCost(i, rate); },
+    _removeMechRow: function(i) { if (WorkshopModule._removeMechRow) WorkshopModule._removeMechRow(i); },
+    _updateFinTotal: function() { if (WorkshopModule._updateFinTotal) WorkshopModule._updateFinTotal(); }
+  };
+
 })();
