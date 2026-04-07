@@ -201,7 +201,7 @@ var ReportsModule = (function () {
         }
       }
       // 2. Contabilizar horas y costo desde laborEntries (multi-mecánico)
-      (w.laborEntries || []).forEach(function(entry) {
+      (w.laborEntries || []).forEach(function (entry) {
         if (techStats[entry.employeeId]) {
           techStats[entry.employeeId].totalHours = Utils.dec.add(techStats[entry.employeeId].totalHours, entry.hours || 0);
           techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
@@ -674,7 +674,7 @@ var ReportsModule = (function () {
     var rows = wos.map(function (w) {
       var mat = w.materialBase !== undefined ? w.materialBase : (w.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
       var equipoStr = (w.laborEntries || []).length
-        ? w.laborEntries.map(function(e){ return e.name; }).join(', ')
+        ? w.laborEntries.map(function (e) { return e.name; }).join(', ')
         : (eMap[w.assignedTo] || '—');
       return ['OT', w.number, w.date, w.vehiclePlate || '—', w.description, equipoStr, w.laborHours || 0, mat, w.laborCost || 0, w.externalCost || 0, w.totalCost || 0, Utils.OT_STATUS[w.status] ? Utils.OT_STATUS[w.status].label : w.status, w.notes || ''];
     });
@@ -712,7 +712,7 @@ var ReportsModule = (function () {
         if (w.status === 'en_proceso' || w.status === 'esperando_repuestos') techStats[w.assignedTo].inProcess++;
       }
       // Participación por laborEntries
-      (w.laborEntries || []).forEach(function(entry) {
+      (w.laborEntries || []).forEach(function (entry) {
         if (techStats[entry.employeeId]) {
           techStats[entry.employeeId].hours = Utils.dec.add(techStats[entry.employeeId].hours, entry.hours || 0);
           techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
