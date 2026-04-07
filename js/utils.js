@@ -277,9 +277,22 @@ var Utils = (function () {
       '<h2 style="margin-bottom:10px;">Información General</h2>' +
       '<table class="meta-table"><tbody>' +
       '<tr><td>Fecha Emisión</td><td>' + formatDate(wo.date) + '</td><td>Prioridad</td><td>' + (wo.priority || '').toUpperCase() + '</td></tr>' +
-      '<tr><td>Tipo</td><td>' + (wo.maintenanceType === 'preventivo' ? '<span class="badge-prev">📅 PREVENTIVO</span>' : '<span class="badge-corr">🔧 CORRECTIVO</span>') + '</td><td>Estado</td><td>' + (OT_STATUS[wo.status] || { label: wo.status }).label + '</td></tr>' +
-      '<tr><td>Solicitante</td><td>' + escapeHtml(solicitante ? solicitante.name : wo.requesterName) + '</td><td>Cerrada</td><td>' + (wo.closedAt ? formatDate(wo.closedAt) : '—') + '</td></tr>' +
-      '<tr><td>Técnico Responsable</td><td>' + escapeHtml(tecnico ? tecnico.name : 'Sin asignar') + '</td><td>Vehículo</td><td>' + escapeHtml(wo.vehiclePlate || '—') + '</td></tr>' +
+      '<tr><td>Tipo</td><td>' + (wo.maintenanceType === 'preventivo' ? '<span class="badge-prev">📅 PREVENTIVO</span>' : '<span class="badge-corr">🔧 CORRECTIVO</span>') + '</td><td>Estado</td><td>' + (OT_STATUS[wo.status] || { label: wo.status }).label + '</td></tr>' + 
+      '<tr><td>Solicitante</td><td>' + escapeHtml(solicitante ? solicitante.name : wo.requesterName) + '</td><td>Cerrada</td><td>' + (wo.closedAt ? formatDate(wo.closedAt) : '—') + '</td></tr>' +        
+      (function() {
+        var equipoLabel, equipoVal;
+        if ((wo.laborEntries || []).length > 1) {
+          equipoLabel = 'Equipo Técnico';
+          equipoVal = wo.laborEntries.map(function(e){ return escapeHtml(e.name); }).join(', ');
+        } else if ((wo.laborEntries || []).length === 1) {
+          equipoLabel = 'Técnico';
+          equipoVal = escapeHtml(wo.laborEntries[0].name);
+        } else {
+          equipoLabel = 'Técnico Responsable';
+          equipoVal = escapeHtml(tecnico ? tecnico.name : 'Sin asignar');
+        }
+        return '<tr><td>' + equipoLabel + '</td><td>' + equipoVal + '</td><td>Vehículo</td><td>' + escapeHtml(wo.vehiclePlate || '—') + '</td></tr>';
+      })() +
       '</tbody></table>' +
       '<h2 style="margin-top:20px;margin-bottom:6px;">Descripción del Trabajo</h2>' +
       '<p style="border:1px solid #ccc;padding:10px;min-height:50px;">' + escapeHtml(wo.description) + '</p>' +
