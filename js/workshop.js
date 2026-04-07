@@ -349,17 +349,13 @@ var WorkshopModule = (function () {
       (!isCompleted ? 
       '<div class="form-group" style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;">' +
       '<label>➕ Añadir Repuesto Extra a la OT</label>' +
-      '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:6px;margin-top:4px;align-items:center;">' +
-      '<select class="form-select" id="dlv-extra-item">' +
+      '<div class="flex gap-2" style="margin-top:4px;align-items:center;">' +
+      '<select class="form-select" id="dlv-extra-item" style="flex:1;">' +
       '<option value="">Buscar repuesto...</option>' +
       DB.getAll('items').map(function (i) { return '<option value="' + i.id + '">' + Utils.escapeHtml(i.code + ' — ' + i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
       '</select>' +
-      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:70px;" placeholder="Cant.">' +
-      '<select class="form-select" id="dlv-extra-mech" style="max-width:160px;">' +
-      '<option value="">-- Mecánico --</option>' +
-      DB.getAll('employees').filter(function(e){ return e.active && e.isTechnician; }).map(function(e){ return '<option value="' + e.id + '">' + Utils.escapeHtml(e.name) + '</option>'; }).join('') +
-      '</select>' +
-      '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">+ Añadir</button>' +
+      '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +
+      '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">➕ Añadir</button>' +
       '</div></div>' : '') +
       '<div id="dlv-mats">' + buildMatHtml() + '</div>' +
       '<div class="divider"></div>' +
@@ -400,13 +396,10 @@ var WorkshopModule = (function () {
         btnExtra.onclick = function() {
           var sel = document.getElementById('dlv-extra-item');
           var qty = parseFloat(document.getElementById('dlv-extra-qty').value) || 0;
-          var mechSel = document.getElementById('dlv-extra-mech');
-          var mechId = mechSel ? mechSel.value : null;
           var iId = sel.value;
 
           if (!iId) { Utils.toast('Selecciona un repuesto.', 'warning'); return; }
           if (qty <= 0) { Utils.toast('La cantidad debe ser mayor a 0.', 'error'); return; }
-          if (!mechId) { Utils.toast('⚠️ Indica qué mecánico solicita este repuesto.', 'warning'); return; }
 
           var item = DB.getById('items', iId);
           if (!item) return;
@@ -421,20 +414,17 @@ var WorkshopModule = (function () {
               unit: item.unit || 'unidad',
               qtyRequested: qty,
               qtyDelivered: 0,
-              delivered: false,
-              requestedBy: mechId  // Mecánico que solicitó el repuesto
+              delivered: false
             });
           }
 
           DB.update('workOrders', woId, { materials: wo.materials });
 
-          // Registrar log en el Muro de Actividad
+          // Registrar log de repuesto extra (sin atribución de mecánico)
           var settings2 = DB.getSettings();
-          var mech = DB.getById('employees', mechId);
-          var mechName = mech ? mech.name : 'Desconocido';
           WorkOrdersModule.addWOLog(
             woId,
-            mechName + ' solicitó ' + qty + ' ' + item.unit + ' de "' + item.name + '"',
+            'Repuesto extra añadido: ' + qty + ' ' + item.unit + ' de "' + item.name + '"',
             settings2.activeUserId
           );
 

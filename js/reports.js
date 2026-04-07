@@ -188,12 +188,11 @@ var ReportsModule = (function () {
     });
 
     wos.forEach(function (w) {
+      // 1. OT donde es el responsable principal
       if (techStats[w.assignedTo]) {
         techStats[w.assignedTo].wos.push(w);
         if (w.status === 'completada') {
           techStats[w.assignedTo].completed++;
-          techStats[w.assignedTo].totalHours += (w.laborHours || 0);
-          techStats[w.assignedTo].laborCost = Utils.dec.add(techStats[w.assignedTo].laborCost, w.laborCost || 0);
           techStats[w.assignedTo].totalCost = Utils.dec.add(techStats[w.assignedTo].totalCost, w.totalCost || 0);
         } else if (w.status === 'en_proceso' || w.status === 'esperando_repuestos') {
           techStats[w.assignedTo].inProcess++;
@@ -201,6 +200,13 @@ var ReportsModule = (function () {
           techStats[w.assignedTo].cancelled++;
         }
       }
+      // 2. Contabilizar horas y costo desde laborEntries (multi-mecánico)
+      (w.laborEntries || []).forEach(function(entry) {
+        if (techStats[entry.employeeId]) {
+          techStats[entry.employeeId].totalHours = Utils.dec.add(techStats[entry.employeeId].totalHours, entry.hours || 0);
+          techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
+        }
+      });
     });
 
     var html = '<div class="card" style="padding:0;">' +
@@ -693,16 +699,22 @@ var ReportsModule = (function () {
       techStats[e.id] = { name: e.name, position: pos ? pos.name : '—', salary: salary, rate: Math.round(salary / baseHours), completed: 0, inProcess: 0, total: 0, hours: 0, laborCost: 0, cost: 0 };
     });
     wos.forEach(function (w) {
+      // Responsable principal
       if (techStats[w.assignedTo]) {
         techStats[w.assignedTo].total++;
         if (w.status === 'completada') {
           techStats[w.assignedTo].completed++;
-          techStats[w.assignedTo].hours += (w.laborHours || 0);
-          techStats[w.assignedTo].laborCost = Utils.dec.add(techStats[w.assignedTo].laborCost, w.laborCost || 0);
           techStats[w.assignedTo].cost = Utils.dec.add(techStats[w.assignedTo].cost, w.totalCost || 0);
         }
         if (w.status === 'en_proceso' || w.status === 'esperando_repuestos') techStats[w.assignedTo].inProcess++;
       }
+      // Participación por laborEntries
+      (w.laborEntries || []).forEach(function(entry) {
+        if (techStats[entry.employeeId]) {
+          techStats[entry.employeeId].hours = Utils.dec.add(techStats[entry.employeeId].hours, entry.hours || 0);
+          techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
+        }
+      });
     });
     Utils.exportExcel('reporte_tecnicos_' + Utils.todayISO() + '.xlsx', 'Rendimiento de Técnicos',
       ['Técnico', 'Cargo', 'Sueldo Mensual', 'Tarifa Hora', 'OTs Completadas', 'OTs En Proceso', 'Total OTs', 'Horas Registradas', 'Costo M.O.', 'Costo Total Gestionado'],

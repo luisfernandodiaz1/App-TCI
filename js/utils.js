@@ -260,9 +260,11 @@ var Utils = (function () {
       'th{background:#1e293b;color:#fff;padding:8px 10px;border:1px solid #333;text-align:left;font-size:10pt;}' +
       '.meta-table td{padding:5px 10px;border:1px solid #ccc;font-size:10pt;}' +
       '.meta-table td:first-child{font-weight:bold;background:#f5f5f5;width:140px;}' +
-      '.sign-area{display:flex;justify-content:space-around;margin-top:40px;}' +
-      '.sign-box{text-align:center;width:35%;}' +
+      '.sign-area{display:flex;justify-content:space-around;margin-top:40px;flex-wrap:wrap;gap:20px;}' +
+      '.sign-box{text-align:center;min-width:180px;}' +
       '.sign-line{border-top:1px solid #333;margin-top:40px;padding-top:5px;font-size:10pt;}' +
+      '.badge-prev{display:inline-block;padding:2px 10px;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:4px;font-weight:700;font-size:9pt;}' +
+      '.badge-corr{display:inline-block;padding:2px 10px;background:#dbeafe;border:1px solid #3b82f6;color:#1e40af;border-radius:4px;font-weight:700;font-size:9pt;}' +
       '@media print{button{display:none;}}' +
       '</style></head><body>' +
       '<div class="header">' +
@@ -275,8 +277,9 @@ var Utils = (function () {
       '<h2 style="margin-bottom:10px;">Información General</h2>' +
       '<table class="meta-table"><tbody>' +
       '<tr><td>Fecha Emisión</td><td>' + formatDate(wo.date) + '</td><td>Prioridad</td><td>' + (wo.priority || '').toUpperCase() + '</td></tr>' +
-      '<tr><td>Solicitante</td><td>' + escapeHtml(solicitante ? solicitante.name : wo.requesterName) + '</td><td>Estado</td><td>' + (OT_STATUS[wo.status] || { label: wo.status }).label + '</td></tr>' +
-      '<tr><td>Técnico Asignado</td><td>' + escapeHtml(tecnico ? tecnico.name : 'Sin asignar') + '</td><td>Cerrada</td><td>' + (wo.closedAt ? formatDate(wo.closedAt) : '—') + '</td></tr>' +
+      '<tr><td>Tipo</td><td>' + (wo.maintenanceType === 'preventivo' ? '<span class="badge-prev">📅 PREVENTIVO</span>' : '<span class="badge-corr">🔧 CORRECTIVO</span>') + '</td><td>Estado</td><td>' + (OT_STATUS[wo.status] || { label: wo.status }).label + '</td></tr>' +
+      '<tr><td>Solicitante</td><td>' + escapeHtml(solicitante ? solicitante.name : wo.requesterName) + '</td><td>Cerrada</td><td>' + (wo.closedAt ? formatDate(wo.closedAt) : '—') + '</td></tr>' +
+      '<tr><td>Técnico Responsable</td><td>' + escapeHtml(tecnico ? tecnico.name : 'Sin asignar') + '</td><td>Vehículo</td><td>' + escapeHtml(wo.vehiclePlate || '—') + '</td></tr>' +
       '</tbody></table>' +
       '<h2 style="margin-top:20px;margin-bottom:6px;">Descripción del Trabajo</h2>' +
       '<p style="border:1px solid #ccc;padding:10px;min-height:50px;">' + escapeHtml(wo.description) + '</p>' +
@@ -287,7 +290,20 @@ var Utils = (function () {
       '<p style="border:1px solid #ccc;padding:10px;min-height:40px;">' + escapeHtml(wo.notes || '') + '</p>';
 
     if (wo.status === 'completada') {
+      var laborEntries = wo.laborEntries || [];
       var matSum = (wo.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
+
+      html += '<h2 style="margin-top:20px;margin-bottom:6px;">Equipo de Trabajo</h2>';
+      if (laborEntries.length) {
+        html += '<table><thead><tr><th>Mecánico</th><th style="text-align:center;width:100px;">Horas</th><th style="text-align:right;width:130px;">Costo M.O.</th></tr></thead><tbody>';
+        laborEntries.forEach(function(e) {
+          html += '<tr><td>' + escapeHtml(e.name) + '</td><td style="text-align:center;">' + e.hours + ' hrs</td><td style="text-align:right;">$ ' + fmtNum(e.cost) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      } else {
+        html += '<p style="border:1px solid #ccc;padding:10px;">' + escapeHtml(tecnico ? tecnico.name : 'Sin asignar') + '</p>';
+      }
+
       html += '<h2 style="margin-top:20px;margin-bottom:6px;">Desglose Financiero (Costo de Mantenimiento)</h2>' +
         '<table class="meta-table" style="width:50%; margin-bottom:20px;"><tbody>' +
         '<tr><td>Costo Repuestos consumidos</td><td style="text-align:right;">$ ' + fmtNum(matSum) + '</td></tr>' +
@@ -297,10 +313,18 @@ var Utils = (function () {
         '</tbody></table>';
     }
 
-    html += '<div class="sign-area">' +
-      '<div class="sign-box"><div class="sign-line">Solicitante / Mantenimiento</div></div>' +
-      '<div class="sign-box"><div class="sign-line">Técnico de Taller</div></div>' +
-      '</div>' +
+    // Firmas — una por mecánico si hay laborEntries, si no la clásica
+    var signBoxes;
+    if ((wo.laborEntries || []).length > 1) {
+      signBoxes = wo.laborEntries.map(function(e) {
+        return '<div class="sign-box"><div class="sign-line">' + escapeHtml(e.name) + '</div></div>';
+      }).join('');
+    } else {
+      signBoxes = '<div class="sign-box"><div class="sign-line">Solicitante / Mantenimiento</div></div>' +
+        '<div class="sign-box"><div class="sign-line">' + escapeHtml(tecnico ? tecnico.name : 'Técnico de Taller') + '</div></div>';
+    }
+
+    html += '<div class="sign-area">' + signBoxes + '</div>' +
       '<button onclick="window.print()" style="margin-top:20px;padding:8px 20px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11pt;">🖨️ Imprimir</button>' +
       '</body></html>';
 
