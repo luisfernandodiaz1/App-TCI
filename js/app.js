@@ -29,15 +29,21 @@ var App = (function () {
       navigate(current);
     });
 
-    // 🏎️ SALIDA DEL SPLASH SCREEN (Efecto Moderno)
+    // 🏎️ REVELACIÓN GRADUAL (THE GLASS REVEAL)
     setTimeout(function() {
       var splash = document.getElementById('splash-screen');
       if (splash) {
         splash.classList.add('fade-out');
-        // Limpieza del DOM tras la animación
-        setTimeout(function() { splash.remove(); }, 800);
+        
+        // Iniciamos la cascada de la App 300ms después de empezar a desvanecer el splash
+        setTimeout(function() {
+          document.body.classList.add('loaded');
+        }, 300);
+
+        // Limpieza final del DOM
+        setTimeout(function() { splash.remove(); }, 1200);
       }
-    }, 2200);
+    }, 1500);
   }
 
   // ── Data Guard ─────────────────────────────────────────────
