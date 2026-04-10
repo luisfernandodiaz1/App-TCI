@@ -28,22 +28,6 @@ var App = (function () {
       var current = location.hash.replace('#', '') || 'dashboard';
       navigate(current);
     });
-
-    // 🏎️ REVELACIÓN GRADUAL (THE GLASS REVEAL)
-    setTimeout(function() {
-      var splash = document.getElementById('splash-screen');
-      if (splash) {
-        splash.classList.add('fade-out');
-        
-        // Iniciamos la cascada de la App 300ms después de empezar a desvanecer el splash
-        setTimeout(function() {
-          document.body.classList.add('loaded');
-        }, 300);
-
-        // Limpieza final del DOM
-        setTimeout(function() { splash.remove(); }, 1200);
-      }
-    }, 1500);
   }
 
   // ── Data Guard ─────────────────────────────────────────────
