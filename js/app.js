@@ -28,6 +28,16 @@ var App = (function () {
       var current = location.hash.replace('#', '') || 'dashboard';
       navigate(current);
     });
+
+    // 🏎️ SALIDA DEL SPLASH SCREEN (Efecto Moderno)
+    setTimeout(function() {
+      var splash = document.getElementById('splash-screen');
+      if (splash) {
+        splash.classList.add('fade-out');
+        // Limpieza del DOM tras la animación
+        setTimeout(function() { splash.remove(); }, 800);
+      }
+    }, 2200);
   }
 
   // ── Data Guard ─────────────────────────────────────────────
