@@ -329,7 +329,7 @@ var ReportsModule = (function () {
       '</tr></thead><tbody>' +
       stats.map(function (s) {
         var badgeCls = s.color === 'green' ? 'badge-green' : (s.color === 'amber' ? 'badge-amber' : 'badge-red');
-        return '<tr>' +
+        return '<tr onclick="ReportsModule.showVehicleMonthlyDetail(\'' + s.id + '\')" style="cursor:pointer;" title="Click para ver detalle mensual">' +
           '<td><strong style="color:var(--accent-cyan);">' + Utils.escapeHtml(s.plate) + '</strong><div class="text-xs text-muted">' + Utils.escapeHtml(s.name) + '</div></td>' +
           '<td>' + s.count + ' OT(s)</td>' +
           '<td style="font-weight:700;color:var(--color-danger);">' + Utils.fmtNum(s.downtime) + ' hrs</td>' +
@@ -354,27 +354,148 @@ var ReportsModule = (function () {
     var diffDays = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
     var totalPeriodHours = diffDays * 24;
 
-    var rows = vehicles.map(function (v) {
+    var finalRows = [];
+    // Fila de Encabezado de Auditoría
+    finalRows.push(['PERIODO DE ANALISIS:', dateFrom + ' al ' + dateTo, '', '', '', '', '', '']);
+    finalRows.push(['', '', '', '', '', '', '', '']); // Separador
+
+    vehicles.forEach(function (v) {
       var vWOs = wos.filter(function (w) { return w.vehicleId === v.id; });
       var downtimeHours = 0;
       vWOs.forEach(function (w) {
-        if (w.laborEntries && w.laborEntries.length > 0) {
-          downtimeHours += w.laborEntries.reduce(function (acc, e) { return acc + (e.hours || 0); }, 0);
-        } else {
-          downtimeHours += (w.laborHours || 0);
-        }
+        downtimeHours += (w.laborEntries ? w.laborEntries.reduce(function (a, e) { return a + (e.hours || 0); }, 0) : (w.laborHours || 0));
       });
+      
       var availableHours = Math.max(0, totalPeriodHours - downtimeHours);
       var availPct = (availableHours / totalPeriodHours) * 100;
-      var status = availPct > 90 ? 'Excelente' : (availPct >= 80 ? 'Regular' : 'Crítico');
+      var mttr = vWOs.length > 0 ? (downtimeHours / vWOs.length) : 0;
+      var status = availPct > 90 ? 'Excelente' : (availPct >= 80 ? 'Regular' : 'Critico');
 
-      return [v.plate, v.brand + ' ' + v.model, vWOs.length, downtimeHours, availableHours, parseFloat(availPct.toFixed(2)), status];
+      // Fila RESUMEN de Vehículo
+      finalRows.push([
+        v.plate, 
+        v.brand + ' ' + v.model + ' (RESUMEN TOTAL)', 
+        vWOs.length, 
+        parseFloat(downtimeHours.toFixed(1)), 
+        parseFloat(availableHours.toFixed(1)), 
+        parseFloat(mttr.toFixed(1)), 
+        parseFloat(availPct.toFixed(2)), 
+        status
+      ]);
+
+      // Filas de DESGLOSE MENSUAL
+      var monthly = getMonthlyBreakdown(v.id, dateFrom, dateTo).reverse(); // Organizar de antiguo a nuevo para el Excel
+      monthly.forEach(function(m) {
+        finalRows.push([
+          '', 
+          '└─ ' + m.label, 
+          m.ots, 
+          m.downtime, 
+          m.available, 
+          parseFloat(m.mttr.toFixed(1)), 
+          parseFloat(m.pct.toFixed(2)), 
+          m.pct > 90 ? 'E' : (m.pct >= 80 ? 'R' : 'C')
+        ]);
+      });
+
+      finalRows.push(['', '', '', '', '', '', '', '']); // Separador entre vehículos
     });
 
-    Utils.exportExcel('reporte_disponibilidad_' + Utils.todayISO() + '.xlsx', 'Reporte de Disponibilidad Operativa (Downtime)',
-      ['Placa', 'Vehículo', 'Cantidad OTs', 'Horas Inactivas (Taller)', 'Horas Disponibles (Calle)', '% Disponibilidad', 'Estado'],
-      rows);
-    Utils.toast('Reporte de disponibilidad exportado.', 'success');
+    var fileName = 'reporte_disponibilidad_DEL_' + dateFrom + '_AL_' + dateTo + '.xlsx';
+    var headers = ['Móvil / Placa', 'Vehículo / Mes de Análisis', 'Cant. OTs', 'Inactividad (Hrs)', 'Disponible (Hrs)', 'MTTR (Hrs/OT)', '% Disponibilidad', 'Salud'];
+    
+    Utils.exportExcel(fileName, 'Disponibilidad Operativa TCI', headers, finalRows);
+    Utils.toast('✅ Power Report generado: ' + fileName, 'success');
+  }
+
+  // ── Detalle Mensual de Disponibilidad (Time-Series) ────────
+  function getMonthlyBreakdown(vehicleId, from, to) {
+    var vehicle = DB.getById('vehicles', vehicleId);
+    if (!vehicle) return [];
+
+    var start = new Date(from + 'T00:00:00');
+    var end = new Date(to + 'T23:59:59');
+    var months = [];
+    var current = new Date(start.getFullYear(), start.getMonth(), 1);
+
+    while (current <= end) {
+      var mStart = new Date(current.getFullYear(), current.getMonth(), 1);
+      var mEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0, 23, 59, 59);
+
+      // Ajustar a los límites del filtro global
+      var effectiveStart = mStart < start ? start : mStart;
+      var effectiveEnd = mEnd > end ? end : mEnd;
+
+      if (effectiveStart <= effectiveEnd) {
+        var diffHrs = Math.ceil((effectiveEnd - effectiveStart) / (1000 * 60 * 60));
+        var monthKey = current.toLocaleString('es-CO', { month: 'long', year: 'numeric' });
+        
+        // Filtrar OTs de este vehículo en este mes específico
+        var isoStart = effectiveStart.toISOString().split('T')[0];
+        var isoEnd = effectiveEnd.toISOString().split('T')[0];
+        var monthWOs = DB.getAll('workOrders').filter(function(w) {
+          return w.vehicleId === vehicleId && w.status === 'completada' && w.date >= isoStart && w.date <= isoEnd;
+        });
+
+        var downtime = monthWOs.reduce(function(acc, w) {
+          return acc + (w.laborEntries ? w.laborEntries.reduce(function(a, e){ return a + (e.hours || 0); }, 0) : (w.laborHours || 0));
+        }, 0);
+
+        var avail = Math.max(0, diffHrs - downtime);
+        var pct = (avail / diffHrs) * 100;
+        var mttr = monthWOs.length > 0 ? (downtime / monthWOs.length) : 0;
+
+        months.push({
+          label: monthKey.charAt(0).toUpperCase() + monthKey.slice(1),
+          totalHours: diffHrs,
+          downtime: downtime,
+          available: avail,
+          pct: pct,
+          ots: monthWOs.length,
+          mttr: mttr
+        });
+      }
+      current.setMonth(current.getMonth() + 1);
+    }
+    return months.reverse(); // De más reciente a más antiguo
+  }
+
+  function showVehicleMonthlyDetail(vehicleId) {
+    var vehicle = DB.getById('vehicles', vehicleId);
+    if (!vehicle) return;
+
+    var history = getMonthlyBreakdown(vehicleId, dateFrom, dateTo);
+    var old = document.getElementById('rpt-avail-modal'); if (old) old.remove();
+
+    var html = '<div class="modal-overlay" id="rpt-avail-modal"><div class="modal modal-lg">' +
+      '<div class="modal-header">' +
+      '<div><h3>📈 Historial de Disponibilidad: ' + Utils.escapeHtml(vehicle.plate) + '</h3>' +
+      '<div class="text-xs text-muted">' + Utils.escapeHtml(vehicle.brand + ' ' + vehicle.model) + '</div></div>' +
+      '<button class="modal-close" onclick="document.getElementById(\'rpt-avail-modal\').remove()">✕</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+      '<div class="alert-banner info" style="margin-bottom:16px;">Analizando rendimiento desde ' + Utils.formatDate(dateFrom) + ' hasta ' + Utils.formatDate(dateTo) + '.</div>' +
+      '<div class="table-wrapper"><table><thead><tr>' +
+      '<th>Mes / Período</th><th>OTs</th><th>Downtime (Hrs)</th><th>MTTR (Promedio)</th><th>Disponibilidad</th>' +
+      '</tr></thead><tbody>' +
+      history.map(function(m) {
+        var color = m.pct > 90 ? 'var(--color-success)' : (m.pct >= 80 ? 'var(--color-warning)' : 'var(--color-danger)');
+        return '<tr>' +
+          '<td><strong>' + m.label + '</strong></td>' +
+          '<td>' + m.ots + '</td>' +
+          '<td style="font-weight:600;color:var(--color-danger);">' + Utils.fmtNum(m.downtime) + ' hrs</td>' +
+          '<td class="text-sm">' + m.mttr.toFixed(1) + ' hrs/reparación</td>' +
+          '<td><div style="display:flex;align-items:center;gap:10px;">' +
+          '<div style="flex:1;height:8px;background:var(--bg-elevated);border-radius:4px;overflow:hidden;"><div style="width:' + m.pct + '%;height:100%;background:' + color + ';"></div></div>' +
+          '<span style="font-weight:800;color:' + color + ';">' + m.pct.toFixed(1) + '%</span></div></td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      '</div>' +
+      '<div class="modal-footer"><button class="btn btn-secondary" onclick="document.getElementById(\'rpt-avail-modal\').remove()">Cerrar Detalle</button></div>' +
+      '</div></div>';
+
+    document.body.insertAdjacentHTML('beforeend', html);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -993,5 +1114,8 @@ var ReportsModule = (function () {
     Utils.toast('Reporte TCO (Costo Total) exportado.', 'success');
   }
 
-  return { render: render };
+  return { 
+    render: render,
+    showVehicleMonthlyDetail: showVehicleMonthlyDetail
+  };
 })();
