@@ -71,6 +71,17 @@ var DB = (function () {
         if (v.mileage !== undefined) { v.hours = v.mileage; delete v.mileage; }
       });
     }
+    if (data.workOrders) {
+      data.workOrders.forEach(function (w) {
+        if (w.km !== undefined) { w.vehicleHours = w.km; delete w.km; }
+        // 🔹 Sistema de Auto-Sanado (Auto-Healing) para OTs Preventivas Fantasmas
+        // Si fue creada antes del Poka-Yoke y le falta el enlance a la rutina madre,
+        // se degrada a OT normal para evitar que crashee la lógica de cierre (workorders.js).
+        if (w.isPreventive && !w.routineId) {
+          w.isPreventive = false;
+        }
+      });
+    }
     return data;
   }
 

@@ -6,7 +6,7 @@ var ReportsModule = (function () {
   'use strict';
 
   var dateFrom = '', dateTo = '', filterVehicle = '';
-  var activeTab = 'general'; // 'general' | 'technicians' | 'consumption' | 'preventivos' | 'kmdiario'
+  var activeTab = 'general'; // 'general' | 'technicians' | 'consumption' | 'preventivos' | 'kmdiario' | 'availability'
 
   // ── Main Render ────────────────────────────────────────────
   function render() {
@@ -15,16 +15,17 @@ var ReportsModule = (function () {
     if (!dateFrom) dateFrom = thirtyDaysAgo;
     if (!dateTo) dateTo = today;
 
-    // Solo los tabs general, técnicos y consumo usan filtro de fecha/vehículo
-    var showFilter = (activeTab === 'general' || activeTab === 'technicians' || activeTab === 'consumption' || activeTab === 'kmdiario');
+    // Solo los tabs general, técnicos, consumo y disponibilidad usan filtro de fecha/vehículo
+    var showFilter = (activeTab === 'general' || activeTab === 'technicians' || activeTab === 'consumption' || activeTab === 'kmdiario' || activeTab === 'availability');
 
     var html = '<div class="section-header">' +
       '<div class="section-header-left"><h2>📊 Reportes</h2></div>' +
       '</div>' +
 
-      // Tabs — 5 tabs
+      // Tabs — 6 tabs
       '<div class="tabs" style="margin-bottom:20px;">' +
       '<button class="tab-btn ' + (activeTab === 'general' ? 'active' : '') + '" id="rpt-tab-gen">📊 General</button>' +
+      '<button class="tab-btn ' + (activeTab === 'availability' ? 'active' : '') + '" id="rpt-tab-avail">⏱️ Disponibilidad</button>' +
       '<button class="tab-btn ' + (activeTab === 'technicians' ? 'active' : '') + '" id="rpt-tab-tech">👨‍🔧 Técnicos</button>' +
       '<button class="tab-btn ' + (activeTab === 'consumption' ? 'active' : '') + '" id="rpt-tab-cons">📦 Consumo</button>' +
       '<button class="tab-btn ' + (activeTab === 'preventivos' ? 'active' : '') + '" id="rpt-tab-prev">⚙️ Alertas Preventivas</button>' +
@@ -53,6 +54,7 @@ var ReportsModule = (function () {
 
     // Tab events
     document.getElementById('rpt-tab-gen').onclick = function () { activeTab = 'general'; render(); };
+    document.getElementById('rpt-tab-avail').onclick = function () { activeTab = 'availability'; render(); };
     document.getElementById('rpt-tab-tech').onclick = function () { activeTab = 'technicians'; render(); };
     document.getElementById('rpt-tab-cons').onclick = function () { activeTab = 'consumption'; render(); };
     document.getElementById('rpt-tab-prev').onclick = function () { activeTab = 'preventivos'; render(); };
@@ -94,6 +96,7 @@ var ReportsModule = (function () {
       renderMaterialChart(salidas);
       wireExportBtn('rpt-exp-wo', function () { exportWO(wos, logs); });
       wireExportBtn('rpt-exp-mov', function () { exportMov(movs); });
+      wireExportBtn('rpt-exp-tco', exportConsolidatedTCO);
 
     } else if (activeTab === 'technicians') {
       var wos2 = getWOsInRange(dateFrom, dateTo);
@@ -104,6 +107,11 @@ var ReportsModule = (function () {
       var movs2 = getMovsInRange(dateFrom, dateTo);
       container.innerHTML = renderConsumption(movs2);
       wireExportBtn('rpt-exp-cons', function () { exportConsumption(movs2); });
+
+    } else if (activeTab === 'availability') {
+      var wos3 = getWOsInRange(dateFrom, dateTo).filter(function(w){ return w.status === 'completada'; });
+      container.innerHTML = renderAvailability(wos3);
+      wireExportBtn('rpt-exp-avail', function () { exportAvailability(wos3); });
 
     } else if (activeTab === 'preventivos') {
       container.innerHTML = renderPreventivos();
@@ -153,7 +161,7 @@ var ReportsModule = (function () {
       '</div>';
 
     html += '<div class="card" style="padding:0;margin-bottom:20px;">' +
-      '<div class="card-header" style="padding:16px 20px;"><h3>📊 Resumen Consolidado de Gastos por Vehículo</h3></div>' +
+      '<div class="card-header" style="padding:16px 20px;"><h3>📊 Resumen Consolidado de Gastos por Vehículo (TCO)</h3><button class="btn btn-secondary btn-sm" id="rpt-exp-tco">📤 Exportar Excel Avanzado</button></div>' +
       '<div class="table-wrapper"><table><thead><tr>' +
       '<th>Vehículo / Placa</th><th>Repuestos OT</th><th>Mano de Obra</th><th>Svc. Externos</th><th>Combustible</th><th>Documentos</th><th style="color:var(--color-success);">TOTAL</th>' +
       '</tr></thead>' +
@@ -200,13 +208,19 @@ var ReportsModule = (function () {
           techStats[w.assignedTo].cancelled++;
         }
       }
-      // 2. Contabilizar horas y costo desde laborEntries (multi-mecánico)
-      (w.laborEntries || []).forEach(function (entry) {
-        if (techStats[entry.employeeId]) {
-          techStats[entry.employeeId].totalHours = Utils.dec.add(techStats[entry.employeeId].totalHours, entry.hours || 0);
-          techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
-        }
-      });
+      // 2. Contabilizar horas y costo desde laborEntries (multi-mecánico) o fallback a principal
+      if (w.laborEntries && w.laborEntries.length > 0) {
+        w.laborEntries.forEach(function (entry) {
+          if (techStats[entry.employeeId]) {
+            techStats[entry.employeeId].totalHours = Utils.dec.add(techStats[entry.employeeId].totalHours, entry.hours || 0);
+            techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
+          }
+        });
+      } else if (techStats[w.assignedTo] && w.status === 'completada') {
+        // Fallback para OTs antiguas de cierre simple
+        techStats[w.assignedTo].totalHours = Utils.dec.add(techStats[w.assignedTo].totalHours, w.laborHours || 0);
+        techStats[w.assignedTo].laborCost = Utils.dec.add(techStats[w.assignedTo].laborCost, w.laborCost || 0);
+      }
     });
 
     var html = '<div class="card" style="padding:0;">' +
@@ -218,19 +232,29 @@ var ReportsModule = (function () {
     if (!employees.length) {
       html += '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted);">No hay empleados marcados como técnicos registrados.</td></tr>';
     } else {
-      Object.values(techStats).forEach(function (t) {
-        html += '<tr>' +
-          '<td><div class="flex items-center gap-2"><div class="user-avatar" style="width:30px;height:30px;font-size:0.75rem;">' + Utils.escapeHtml(t.name.substring(0, 2).toUpperCase()) + '</div><strong>' + Utils.escapeHtml(t.name) + '</strong></div></td>' +
-          '<td class="text-sm text-muted">' + Utils.escapeHtml(t.position) + '</td>' +
-          '<td class="text-sm">$ ' + Utils.fmtNum(t.salary) + '</td>' +
-          '<td class="text-sm">$ ' + Utils.fmtNum(t.rate) + '/hr</td>' +
-          '<td><span class="badge badge-green">✅ ' + t.completed + '</span></td>' +
-          '<td><span class="badge badge-amber">⚙️ ' + t.inProcess + '</span></td>' +
-          '<td><strong>' + t.wos.length + '</strong></td>' +
-          '<td style="font-weight:700;color:var(--accent-primary);">' + t.totalHours.toFixed(1) + ' hrs</td>' +
-          '<td>$ ' + Utils.fmtNum(t.laborCost) + '</td>' +
-          '<td style="font-weight:700;color:var(--color-success);">$ ' + Utils.fmtNum(t.totalCost) + '</td></tr>';
-      });
+      var filteredStats = Object.values(techStats);
+      // 🛡️ Filtro de Claridad: Si se filtra por vehículo, ocultar técnicos sin actividad en ese vehículo
+      if (filterVehicle) {
+        filteredStats = filteredStats.filter(function(t) { return t.totalHours > 0 || t.wos.length > 0; });
+      }
+
+      if (!filteredStats.length) {
+        html += '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">Ningún técnico ha realizado trabajos en este vehículo en el período seleccionado.</td></tr>';
+      } else {
+        filteredStats.forEach(function (t) {
+          html += '<tr>' +
+            '<td><div class="flex items-center gap-2"><div class="user-avatar" style="width:30px;height:30px;font-size:0.75rem;">' + Utils.escapeHtml(t.name.substring(0, 2).toUpperCase()) + '</div><strong>' + Utils.escapeHtml(t.name) + '</strong></div></td>' +
+            '<td class="text-sm text-muted">' + Utils.escapeHtml(t.position) + '</td>' +
+            '<td class="text-sm">$ ' + Utils.fmtNum(t.salary) + '</td>' +
+            '<td class="text-sm">$ ' + Utils.fmtNum(t.rate) + '/hr</td>' +
+            '<td><span class="badge badge-green">✅ ' + t.completed + '</span></td>' +
+            '<td><span class="badge badge-amber">⚙️ ' + t.inProcess + '</span></td>' +
+            '<td><strong>' + t.wos.length + '</strong></td>' +
+            '<td style="font-weight:700;color:var(--accent-primary);">' + t.totalHours.toFixed(1) + ' hrs</td>' +
+            '<td>$ ' + Utils.fmtNum(t.laborCost) + '</td>' +
+            '<td style="font-weight:700;color:var(--color-success);">$ ' + Utils.fmtNum(t.totalCost) + '</td></tr>';
+        });
+      }
       var unassigned = wos.filter(function (w) { return !w.assignedTo || !techStats[w.assignedTo]; });
       if (unassigned.length) {
         var unCost = unassigned.filter(function (w) { return w.status === 'completada'; }).reduce(function (a, w) { return Utils.dec.add(a, w.totalCost || 0); }, 0);
@@ -242,6 +266,115 @@ var ReportsModule = (function () {
     }
     html += '</tbody></table></div></div>';
     return html;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  TAB: DISPONIBILIDAD (DOWNTIME / MTTR)
+  // ═══════════════════════════════════════════════════════════
+  function renderAvailability(wos) {
+    var vehicles = DB.getAll('vehicles').filter(function (v) { return v.active; });
+    if (filterVehicle) vehicles = vehicles.filter(function (v) { return v.id === filterVehicle; });
+
+    // Aritmética de Período
+    var d1 = new Date(dateFrom + 'T00:00:00');
+    var d2 = new Date(dateTo + 'T23:59:59');
+    var diffDays = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
+    var totalPeriodHours = diffDays * 24;
+
+    var stats = vehicles.map(function (v) {
+      var vWOs = wos.filter(function (w) { return w.vehicleId === v.id; });
+      var downtimeHours = 0;
+      
+      vWOs.forEach(function (w) {
+        if (w.laborEntries && w.laborEntries.length > 0) {
+          downtimeHours += w.laborEntries.reduce(function (acc, e) { return acc + (e.hours || 0); }, 0);
+        } else {
+          downtimeHours += (w.laborHours || 0);
+        }
+      });
+
+      var availableHours = Math.max(0, totalPeriodHours - downtimeHours);
+      var availPct = (availableHours / totalPeriodHours) * 100;
+      
+      var color = availPct > 90 ? 'green' : (availPct >= 80 ? 'amber' : 'red');
+      var statusLabel = availPct > 90 ? 'Excelente' : (availPct >= 80 ? 'Regular' : 'Crítico');
+
+      return {
+        id: v.id, plate: v.plate, name: v.brand + ' ' + v.model,
+        downtime: downtimeHours, available: availableHours, pct: availPct,
+        color: color, label: statusLabel, count: vWOs.length
+      };
+    });
+
+    stats.sort(function (a, b) { return a.pct - b.pct; });
+
+    // KPIs Globales
+    var avgAvail = stats.length ? stats.reduce(function (a, b) { return a + b.pct; }, 0) / stats.length : 0;
+    var totalDowntime = stats.reduce(function (a, b) { return a + b.downtime; }, 0);
+
+    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;">' +
+      kpiCard('⏱️', 'Disponibilidad Promedio', avgAvail.toFixed(1) + '%', avgAvail > 90 ? 'green' : (avgAvail >= 80 ? 'amber' : 'red')) +
+      kpiCard('🛠️', 'Downtime Total (Mantenimiento)', Utils.fmtNum(totalDowntime) + ' hrs', 'blue') +
+      kpiCard('📅', 'Días en el Período', diffDays + ' días', 'cyan') +
+      kpiCard('🚗', 'Vehículos Analizados', stats.length, 'blue') +
+      '</div>';
+
+    html += '<div class="card" style="padding:0;">' +
+      '<div class="card-header" style="padding:16px 20px;">' +
+      '<h3>📊 Disponibilidad Operativa vs Tiempo en Taller</h3>' +
+      '<button class="btn btn-secondary btn-sm" id="rpt-exp-avail">📤 Exportar Disponibilidad</button>' +
+      '</div>' +
+      '<div class="table-wrapper"><table><thead><tr>' +
+      '<th>Vehículo / Placa</th><th>Mantenimientos</th><th>Horas Inactivas (Downtime)</th><th>Horas Disponibles</th><th>% Disponibilidad</th><th>Estado</th>' +
+      '</tr></thead><tbody>' +
+      stats.map(function (s) {
+        var badgeCls = s.color === 'green' ? 'badge-green' : (s.color === 'amber' ? 'badge-amber' : 'badge-red');
+        return '<tr>' +
+          '<td><strong style="color:var(--accent-cyan);">' + Utils.escapeHtml(s.plate) + '</strong><div class="text-xs text-muted">' + Utils.escapeHtml(s.name) + '</div></td>' +
+          '<td>' + s.count + ' OT(s)</td>' +
+          '<td style="font-weight:700;color:var(--color-danger);">' + Utils.fmtNum(s.downtime) + ' hrs</td>' +
+          '<td>' + Utils.fmtNum(s.available) + ' hrs</td>' +
+          '<td><div style="display:flex;align-items:center;gap:10px;">' +
+          '<div style="flex:1;height:10px;background:var(--bg-elevated);border-radius:5px;overflow:hidden;"><div style="width:' + s.pct + '%;height:100%;background:var(--color-' + s.color + ');"></div></div>' +
+          '<span style="font-weight:800;min-width:45px;">' + s.pct.toFixed(1) + '%</span></div></td>' +
+          '<td><span class="badge ' + badgeCls + '">' + s.label + '</span></td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table></div></div>';
+
+    return html;
+  }
+
+  function exportAvailability(wos) {
+    var vehicles = DB.getAll('vehicles').filter(function (v) { return v.active; });
+    if (filterVehicle) vehicles = vehicles.filter(function (v) { return v.id === filterVehicle; });
+
+    var d1 = new Date(dateFrom + 'T00:00:00');
+    var d2 = new Date(dateTo + 'T23:59:59');
+    var diffDays = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
+    var totalPeriodHours = diffDays * 24;
+
+    var rows = vehicles.map(function (v) {
+      var vWOs = wos.filter(function (w) { return w.vehicleId === v.id; });
+      var downtimeHours = 0;
+      vWOs.forEach(function (w) {
+        if (w.laborEntries && w.laborEntries.length > 0) {
+          downtimeHours += w.laborEntries.reduce(function (acc, e) { return acc + (e.hours || 0); }, 0);
+        } else {
+          downtimeHours += (w.laborHours || 0);
+        }
+      });
+      var availableHours = Math.max(0, totalPeriodHours - downtimeHours);
+      var availPct = (availableHours / totalPeriodHours) * 100;
+      var status = availPct > 90 ? 'Excelente' : (availPct >= 80 ? 'Regular' : 'Crítico');
+
+      return [v.plate, v.brand + ' ' + v.model, vWOs.length, downtimeHours, availableHours, parseFloat(availPct.toFixed(2)), status];
+    });
+
+    Utils.exportExcel('reporte_disponibilidad_' + Utils.todayISO() + '.xlsx', 'Reporte de Disponibilidad Operativa (Downtime)',
+      ['Placa', 'Vehículo', 'Cantidad OTs', 'Horas Inactivas (Taller)', 'Horas Disponibles (Calle)', '% Disponibilidad', 'Estado'],
+      rows);
+    Utils.toast('Reporte de disponibilidad exportado.', 'success');
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -534,7 +667,21 @@ var ReportsModule = (function () {
     return logs;
   }
   function getMovsInRange(from, to) {
-    return DB.getAll('movements').filter(function (m) { return m.date >= from && m.date <= to; });
+    var movs = DB.getAll('movements').filter(function (m) { return m.date >= from && m.date <= to; });
+    if (filterVehicle) {
+      // 1. Obtener OTs del vehículo seleccionado en el rango
+      var vehicleWOs = DB.getAll('workOrders').filter(function(w) { 
+        return w.vehicleId === filterVehicle; 
+      });
+      // 2. Extraer los números de OT (referencia en movimientos)
+      var validRefs = vehicleWOs.map(function(w) { return w.number; });
+      
+      // 3. Filtrar movimientos que referencien esas OTs
+      movs = movs.filter(function(m) { 
+        return validRefs.indexOf(m.reference) !== -1; 
+      });
+    }
+    return movs;
   }
 
   function renderCombinedRows(wos, logs) {
@@ -711,13 +858,18 @@ var ReportsModule = (function () {
         }
         if (w.status === 'en_proceso' || w.status === 'esperando_repuestos') techStats[w.assignedTo].inProcess++;
       }
-      // Participación por laborEntries
-      (w.laborEntries || []).forEach(function (entry) {
-        if (techStats[entry.employeeId]) {
-          techStats[entry.employeeId].hours = Utils.dec.add(techStats[entry.employeeId].hours, entry.hours || 0);
-          techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
-        }
-      });
+      // Participación por laborEntries o fallback a principal
+      if (w.laborEntries && w.laborEntries.length > 0) {
+        w.laborEntries.forEach(function (entry) {
+          if (techStats[entry.employeeId]) {
+            techStats[entry.employeeId].hours = Utils.dec.add(techStats[entry.employeeId].hours, entry.hours || 0);
+            techStats[entry.employeeId].laborCost = Utils.dec.add(techStats[entry.employeeId].laborCost, entry.cost || 0);
+          }
+        });
+      } else if (techStats[w.assignedTo] && w.status === 'completada') {
+        techStats[w.assignedTo].hours = Utils.dec.add(techStats[w.assignedTo].hours, w.laborHours || 0);
+        techStats[w.assignedTo].laborCost = Utils.dec.add(techStats[w.assignedTo].laborCost, w.laborCost || 0);
+      }
     });
     Utils.exportExcel('reporte_tecnicos_' + Utils.todayISO() + '.xlsx', 'Rendimiento de Técnicos',
       ['Técnico', 'Cargo', 'Sueldo Mensual', 'Tarifa Hora', 'OTs Completadas', 'OTs En Proceso', 'Total OTs', 'Horas Registradas', 'Costo M.O.', 'Costo Total Gestionado'],
@@ -770,6 +922,75 @@ var ReportsModule = (function () {
       ['Fecha', 'Placa', 'Vehículo', 'Horas Trabajadas', 'Horómetro Total', 'Notas'],
       rows);
     Utils.toast('Reporte de Horómetro exportado.', 'success');
+  }
+
+  function exportConsolidatedTCO() {
+    var wos = getWOsInRange(dateFrom, dateTo).filter(function (w) { return w.status === 'completada'; });
+    var logs = getMaintenanceLogsInRange(dateFrom, dateTo);
+    var fuelLogs = DB.getAll('fuelLogs').filter(function (l) { return l.date >= dateFrom && l.date <= dateTo; });
+    var docCosts = DB.getAll('vehicleDocuments').filter(function (d) { return d.updatedAt ? (d.updatedAt >= dateFrom && d.updatedAt <= dateTo) : (d.createdAt >= dateFrom && d.createdAt <= dateTo); });
+    
+    if (filterVehicle) {
+       fuelLogs = fuelLogs.filter(function (l) { return l.vehicleId === filterVehicle; });
+       docCosts = docCosts.filter(function (d) { return d.vehicleId === filterVehicle; });
+    }
+
+    var vehicles = DB.getAll('vehicles');
+    var stats = {};
+    vehicles.forEach(function (v) { stats[v.id] = { plate: v.plate, name: (v.brand || '') + ' ' + (v.model || ''), mat: 0, labor: 0, ext: 0, fuel: 0, docs: 0, total: 0 }; });
+
+    wos.forEach(function (w) {
+      if (stats[w.vehicleId]) {
+        var mat = w.materialBase !== undefined ? w.materialBase : (w.materials || []).reduce(function (acc, m) { return acc + (m.totalCost || 0); }, 0);
+        stats[w.vehicleId].mat = Utils.dec.add(stats[w.vehicleId].mat, mat);
+        stats[w.vehicleId].labor = Utils.dec.add(stats[w.vehicleId].labor, w.laborCost || 0);
+        stats[w.vehicleId].ext = Utils.dec.add(stats[w.vehicleId].ext, w.externalCost || 0);
+        stats[w.vehicleId].total = Utils.dec.add(stats[w.vehicleId].total, w.totalCost || 0);
+      }
+    });
+    logs.forEach(function (l) {
+      if (stats[l.vehicleId]) {
+        stats[l.vehicleId].mat = Utils.dec.add(stats[l.vehicleId].mat, l.matCost || 0);
+        stats[l.vehicleId].labor = Utils.dec.add(stats[l.vehicleId].labor, l.laborCost || 0);
+        stats[l.vehicleId].ext = Utils.dec.add(stats[l.vehicleId].ext, l.otherCost || 0);
+        stats[l.vehicleId].total = Utils.dec.add(stats[l.vehicleId].total, l.totalCost || 0);
+      }
+    });
+    (fuelLogs || []).forEach(function (l) {
+      if (stats[l.vehicleId]) {
+        stats[l.vehicleId].fuel = Utils.dec.add(stats[l.vehicleId].fuel, l.cost || 0);
+        stats[l.vehicleId].total = Utils.dec.add(stats[l.vehicleId].total, l.cost || 0);
+      }
+    });
+    (docCosts || []).forEach(function (d) {
+      if (stats[d.vehicleId]) {
+        stats[d.vehicleId].docs = Utils.dec.add(stats[d.vehicleId].docs, d.cost || 0);
+        stats[d.vehicleId].total = Utils.dec.add(stats[d.vehicleId].total, d.cost || 0);
+      }
+    });
+
+    var sorted = Object.values(stats).filter(function (s) { return s.total > 0; }).sort(function (a, b) { return b.total - a.total; });
+    
+    if (!sorted.length) { Utils.toast('No hay gastos para exportar en este período.', 'warning'); return; }
+
+    var rows = sorted.map(function(s) {
+      return [
+        s.plate,
+        s.name,
+        s.mat,
+        s.labor,
+        s.ext,
+        s.fuel,
+        s.docs,
+        s.total
+      ];
+    });
+
+    Utils.exportExcel('reporte_tco_vehiculos_' + Utils.todayISO() + '.xlsx', 'Gastos Consolidado TCO', 
+      ['Móvil / Placa', 'Vehículo', 'Costo Repuestos ($)', 'Costo Mano de Obra ($)', 'Servicios Externos ($)', 'Combustible ($)', 'Documentos Legales ($)', 'Costo Total de Operación ($)'], 
+      rows);
+      
+    Utils.toast('Reporte TCO (Costo Total) exportado.', 'success');
   }
 
   return { render: render };

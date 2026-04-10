@@ -185,6 +185,9 @@ var WorkOrdersModule = (function () {
 
   // ── WIZARD ────────────────────────────────────────────────
   function showWizard(preloadVehicleId, prefillData) {
+    if (!prefillData && !preloadVehicleId) {
+      wizData = {}; wizMats = []; wizStep = 1;
+    }
     if (preloadVehicleId) { wizData.vehicleId = preloadVehicleId; }
     // Si viene de una rutina preventiva, pre-cargar datos
     if (prefillData) {
@@ -254,14 +257,14 @@ var WorkOrdersModule = (function () {
         vehicles.map(function (v) {
           return '<option value="' + v.id + '"' + (wizData.vehicleId === v.id ? ' selected' : '') +
             ' data-plate="' + Utils.escapeHtml(v.plate) + '"' +
-            ' data-km="' + (v.hours || 0) + '"' +
+            ' data-hr="' + (v.hours || 0) + '"' +
             ' data-name="' + Utils.escapeHtml(v.brand + ' ' + v.model + ' ' + v.year) + '">' +
             Utils.escapeHtml(v.plate + ' — ' + v.brand + ' ' + v.model + ' (' + v.year + ')') +
             '</option>';
         }).join('') +
         '</select>' +
         '</div>' +
-        '<div class="form-group"><label>Horómetro al Ingreso (Horas)</label><input class="form-input" type="number" id="wf-km-entry" min="0" value="' + (wizData.vehicleHours || 0) + '"></div>';
+        '<div class="form-group"><label>Horómetro al Ingreso (Horas)</label><input class="form-input" type="number" id="wf-hr-entry" min="0" value="' + (wizData.vehicleHours || 0) + '"></div>';
       footer.innerHTML =
         '<button class="btn btn-secondary" id="wiz-close2">Cancelar</button>' +
         '<button class="btn btn-primary" id="wiz-next1">Siguiente → Paso 2</button>';
@@ -276,7 +279,7 @@ var WorkOrdersModule = (function () {
         }
         
         wizData.vehicleId = sel.value;
-        var vHours = parseFloat(document.getElementById('wf-km-entry').value) || 0;
+        var vHours = parseFloat(document.getElementById('wf-hr-entry').value) || 0;
         
         if (vHours < 0) {
           Utils.toast('El horómetro no puede ser negativo.', 'error');
@@ -307,16 +310,16 @@ var WorkOrdersModule = (function () {
         '<option value="media"' + (!wizData.priority || wizData.priority === 'media' ? ' selected' : '') + '>🟡 Media</option>' +
         '<option value="baja"' + (wizData.priority === 'baja' ? ' selected' : '') + '>🟢 Baja</option>' +
         '</select></div>' +
-        '<div class="form-group"><label>Tipo de Mantenimiento *</label>' +
         (wizData.maintenanceType === 'preventivo'
           ? '<div style="padding:8px 12px;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
             '<span class="badge badge-amber">📅 Preventivo</span>' +
             '<span class="text-xs text-muted">Pre-asignado desde alerta de rutina</span>' +
             '</div>'
-          : '<select class="form-select" id="wf-maint-type">' +
-            '<option value="correctivo"' + (!wizData.maintenanceType || wizData.maintenanceType === 'correctivo' ? ' selected' : '') + '>🛠️ Correctivo (Reparación)</option>' +
-            '<option value="preventivo"' + (wizData.maintenanceType === 'preventivo' ? ' selected' : '') + '>📅 Preventivo (Programado)</option>' +
-            '</select>') +
+          : '<div style="padding:8px 12px;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:8px;">' +
+            '<span class="badge badge-cyan">🛠️ Correctivo</span>' +
+            '<span class="text-xs text-muted">Mantenimiento general / Reparación</span>' +
+            '<input type="hidden" id="wf-maint-type" value="correctivo">' +
+            '</div>') +
         '</div>' +
         '<div class="form-group"><label>Técnico Asignado</label><select class="form-select" id="wf-tech">' +
         '<option value="">Sin asignar</option>' +
@@ -446,13 +449,24 @@ var WorkOrdersModule = (function () {
       requesterName: currentUser ? currentUser.name : 'Sistema',
       laborCost: 0, externalCost: 0, totalCost: 0,
       closedAt: null,
-      createdAt: Utils.todayISO(),
-      // ── Tipo de Mantenimiento ──
-      maintenanceType: wizData.maintenanceType || 'correctivo',
-      isPreventive: (wizData.maintenanceType === 'preventivo') || (wizData.isPreventive || false),
-      routineId: wizData.routineId || null,
-      routineName: wizData.routineName || null
+      createdAt: Utils.todayISO()
     };
+
+    // ── Seguro de Vida (Poka-Yoke Nivel 3) ──
+    var maintTypeFinal = wizData.maintenanceType || 'correctivo';
+    var isPrevFinal = (maintTypeFinal === 'preventivo') || (wizData.isPreventive || false);
+
+    if (isPrevFinal && !wizData.routineId) {
+      isPrevFinal = false;
+      maintTypeFinal = 'correctivo';
+      console.warn("Se impidió la creación de una OT preventiva sin ID de rutina.");
+    }
+
+    data.maintenanceType = maintTypeFinal;
+    data.isPreventive = isPrevFinal;
+    data.routineId = isPrevFinal ? wizData.routineId : null;
+    data.routineName = isPrevFinal ? wizData.routineName : null;
+
     DB.create('workOrders', data);
     // ── Registrar primer log de actividad ──
     var newWO = DB.getAll('workOrders').find(function(w){ return w.number === data.number; });
@@ -500,8 +514,8 @@ var WorkOrdersModule = (function () {
   function updateWizKm(sel) {
     if (!sel.value) return;
     var opt = sel.options[sel.selectedIndex];
-    var hours = opt.getAttribute('data-km');
-    var input = document.getElementById('wf-km-entry');
+    var hours = opt.getAttribute('data-hr');
+    var input = document.getElementById('wf-hr-entry');
     if (input) input.value = hours;
   }
 
@@ -614,7 +628,7 @@ var WorkOrdersModule = (function () {
       '<div style="font-size:0.786rem;color:var(--text-muted);">Emitida el ' + Utils.formatDate(wo.date) + '</div>' +
       '</div>' +
       '<div class="flex gap-2">' +
-      (wo.status === 'en_proceso' ? '<button class="btn btn-success btn-sm" onclick="document.getElementById(\'wod-modal\').remove();WorkOrdersModule.showClosingWizard(\'' + Utils.escapeHtml(wo.id) + '\')">🏁 Finalizar y Cerrar Orden</button>' : '') +
+      (wo.status === 'en_proceso' ? '<button class="btn btn-success btn-sm" onclick="document.getElementById(\'wod-modal\').remove();WorkshopModule.openDeliverModal(\'' + Utils.escapeHtml(wo.id) + '\')">🏁 Gestionar y Cerrar Orden</button>' : '') +
       '<button class="btn btn-secondary btn-sm" onclick="Utils.printOT(DB.getById(\'workOrders\',\'' + Utils.escapeHtml(wo.id) + '\'))">🖨️ Imprimir</button>' +
       (wo.status === 'emitida' || wo.status === 'borrador' ? '<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'wod-modal\').remove();WorkOrdersModule.showEditModal(\'' + Utils.escapeHtml(wo.id) + '\')">✏️ Editar</button>' : '') +
       '<button class="modal-close" id="wod-close">✕</button>' +
@@ -729,93 +743,9 @@ var WorkOrdersModule = (function () {
     }, true);
   }
 
-  function showClosingWizard(id) {
-    var wo = DB.getById('workOrders', id);
-    if (!wo) return;
-    var old = document.getElementById('wo-close-wizard'); if (old) old.remove();
-
-    var matSum = (wo.materials || []).reduce(function (acc, m) { return Utils.dec.add(acc, m.totalCost || 0); }, 0);
-
-    var html = '<div class="modal-overlay" id="wo-close-wizard"><div class="modal">' +
-      '<div class="modal-header"><h3>🏁 Cierre de Orden: ' + Utils.escapeHtml(wo.number) + '</h3><button class="modal-close" id="woc-close-x">✕</button></div>' +
-      '<div class="modal-body">' +
-      '<div style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;border-left:4px solid var(--color-success);">' +
-      '<div class="text-xs text-muted">HORÓMETRO INICIAL</div>' +
-      '<div style="font-weight:700;font-size:1.1rem;">' + Utils.fmtNum(wo.vehicleHours || 0) + ' hrs</div>' +
-      '</div>' +
-      '<div class="form-group"><label>Horómetro Final (Horas) *</label>' +
-      '<input type="number" class="form-input" id="woc-hours" min="' + (wo.vehicleHours || 0) + '" value="' + (wo.vehicleHours || 0) + '"></div>' +
-      '<div class="form-group"><label>Costo Mano de Obra ($) *</label>' +
-      '<input type="number" class="form-input" id="woc-labor" min="0" value="0"></div>' +
-      '<div class="form-group"><label>Servicios Externos ($)</label>' +
-      '<input type="number" class="form-input" id="woc-ext" min="0" value="0"></div>' +
-      '<div style="margin-top:16px;padding:12px;background:var(--bg-elevated);border-radius:8px;text-align:right;">' +
-      '<div class="text-xs text-muted">REPUESTOS: $ ' + Utils.fmtNum(matSum) + '</div>' +
-      '<div id="woc-total-display" style="font-weight:700;font-size:1.2rem;color:var(--color-success);margin-top:4px;">TOTAL OT: $ ' + Utils.fmtNum(matSum) + '</div>' +
-      '</div>' +
-      '</div>' +
-      '<div class="modal-footer"><button class="btn btn-secondary" id="woc-cancel">Cancelar</button><button class="btn btn-success" id="woc-save">💾 Finalizar y Cerrar</button></div>' +
-      '</div></div>';
-
-    document.body.insertAdjacentHTML('beforeend', html);
-    var ov = document.getElementById('wo-close-wizard');
-    var inpHours = document.getElementById('woc-hours');
-    var inpLabor = document.getElementById('woc-labor');
-    var inpExt = document.getElementById('woc-ext');
-    var display = document.getElementById('woc-total-display');
-
-    function updateDocTotal() {
-      var l = parseFloat(inpLabor.value) || 0;
-      var e = parseFloat(inpExt.value) || 0;
-      display.textContent = 'TOTAL OT: $ ' + Utils.fmtNum(Utils.dec.add(matSum, Utils.dec.add(l, e)));
-    }
-    inpLabor.oninput = updateDocTotal;
-    inpExt.oninput = updateDocTotal;
-
-    function close() { ov.remove(); }
-    document.getElementById('woc-close-x').onclick = close;
-    document.getElementById('woc-cancel').onclick = close;
-
-    document.getElementById('woc-save').onclick = function () {
-      var h = parseFloat(inpHours.value) || 0;
-      var l = parseFloat(inpLabor.value) || 0;
-      var e = parseFloat(inpExt.value) || 0;
-
-      if (h < (wo.vehicleHours || 0)) {
-        Utils.toast('El horómetro final no puede ser menor al inicial (' + (wo.vehicleHours || 0) + ').', 'error');
-        return;
-      }
-      if (l < 0 || e < 0) {
-        Utils.toast('Los costos no pueden ser negativos.', 'error');
-        return;
-      }
-      if (l === 0) {
-        if (!confirm('¿Seguro que el costo de mano de obra es $0?')) return;
-      }
-
-      var total = Utils.dec.add(matSum, Utils.dec.add(l, e));
-
-      DB.transaction(function () {
-        DB.update('workOrders', wo.id, {
-          status: 'completada',
-          closedAt: Utils.todayISO(),
-          laborCost: l,
-          externalCost: e,
-          totalCost: total,
-          vehicleHoursFinal: h
-        });
-
-        // Sincronizar horómetro del vehículo
-        var v = DB.getById('vehicles', wo.vehicleId);
-        if (v && h > (v.hours || 0)) {
-          DB.update('vehicles', v.id, { hours: h });
-        }
-      });
-
-      Utils.toast('✅ OT ' + wo.number + ' cerrada exitosamente.', 'success');
-      close(); render(); App.updateBadges();
-    };
-  }
+  // [DEPRECATED v3.0] showClosingWizard() eliminado.
+  // El cierre de OTs se gestiona exclusivamente desde Workshop.openDeliverModal()
+  // que llama a showFinancialCloseModal() con soporte multi-mecánico.
 
   function printWO(id) {
     var wo = DB.getById('workOrders', id);
@@ -852,7 +782,6 @@ var WorkOrdersModule = (function () {
     showWizard: showWizard,
     showEditModal: showEditModal,
     showDetail: showDetail,
-    showClosingWizard: showClosingWizard,
     cancelWO: cancelWO,
     deleteWO: deleteWO,
     printWO: printWO,

@@ -81,22 +81,22 @@ var VehiclesModule = (function () {
       if (fd) fd.onchange = function () { filterDept = fd.value; VehiclesModule.render(); };
       var fs = document.getElementById('veh-fstatus');
       if (fs) fs.onchange = function () { filterStatus = fs.value; VehiclesModule.render(); };
-      var gotoKm = document.getElementById('km-goto-tab');
-      if (gotoKm) gotoKm.onclick = function (e) { e.preventDefault(); activeTab = 'kmdiario'; VehiclesModule.render(); };
+      var gotohr = document.getElementById('hr-goto-tab');
+      if (gotohr) gotohr.onclick = function (e) { e.preventDefault(); activeTab = 'kmdiario'; VehiclesModule.render(); };
     }
     if (activeTab === 'kmdiario') {
-      var dateSel = document.getElementById('km-date-sel');
+      var dateSel = document.getElementById('hr-date-sel');
       if (dateSel) dateSel.onchange = function () {
         kmDiarioDate = dateSel.value.length === 7 ? dateSel.value + '-01' : dateSel.value;
         render();
       };
       // Event delegation for cells
-      var table = document.getElementById('km-matrix-table');
+      var table = document.getElementById('hr-matrix-table');
       if (table) {
         table.onclick = function (e) {
-          var cell = e.target.closest('.km-cell');
+          var cell = e.target.closest('.hr-cell');
           if (cell) {
-            VehiclesModule.showKmEntryModal(cell.dataset.veh, cell.dataset.date);
+            VehiclesModule.showHrEntryModal(cell.dataset.veh, cell.dataset.date);
           }
         };
       }
@@ -143,7 +143,7 @@ var VehiclesModule = (function () {
       html += '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-md);padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">' +
         '<span style="font-size:1.2rem;">⚠️</span>' +
         ' <strong>' + missingHoursToday + ' vehículos</strong> sin horas registradas hoy' +
-        ' · <a href="#" id="km-goto-tab" style="color:var(--accent-primary);text-decoration:none;font-weight:600;">→ Ver Horas Diarias</a></div>';
+        ' · <a href="#" id="hr-goto-tab" style="color:var(--accent-primary);text-decoration:none;font-weight:600;">→ Ver Horas Diarias</a></div>';
     }
 
     html += '<div class="toolbar">' +
@@ -190,8 +190,13 @@ var VehiclesModule = (function () {
       if (hoursDiff <= 0) { isDue = true; statusMsg = 'Vencido por horas (' + Math.abs(hoursDiff) + ' hrs)'; }
       else if (hoursDiff <= 100) { isWarning = true; statusMsg = 'Próximo (' + hoursDiff + ' hrs faltantes)'; }
 
-      var nextDateStr = new Date(new Date(r.lastPerformedDate).getTime() + (r.frequencyDays * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-      var daysDiff = Math.floor((new Date(nextDateStr) - new Date()) / (1000 * 60 * 60 * 24));
+      var nextDate = new Date(r.lastPerformedDate + 'T00:00:00'); 
+      nextDate.setDate(nextDate.getDate() + (r.frequencyDays || 0));
+      
+      var today = new Date();
+      today.setHours(0,0,0,0);
+      
+      var daysDiff = Math.floor((nextDate - today) / (1000 * 60 * 60 * 24));
 
       if (!isDue) {
         if (daysDiff <= 0) { isDue = true; statusMsg = 'Vencido por fecha (Hace ' + Math.abs(daysDiff) + ' días)'; }
@@ -632,13 +637,12 @@ var VehiclesModule = (function () {
       '<div style="font-size:1.3rem;">📏</div>' +
       '<div style="font-size:1.2rem;font-weight:800;color:var(--accent-primary);line-height:1.2;">' + Utils.fmtNum(v.hours || 0) + '</div>' +
       '<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">Horas (Total)</div>' +
-      '<button class="btn btn-ghost btn-sm" style="position:absolute;top:4px;right:4px;" onclick="VehiclesModule.promptUpdateKm(\'' + v.id + '\')">✏️</button>' +
+      '<button class="btn btn-ghost btn-sm" style="position:absolute;top:4px;right:4px;" onclick="VehiclesModule.promptUpdateHrs(\'' + v.id + '\')">✏️</button>' +
       '</div>' +
       '</div>' +
 
       '<div class="tabs" style="padding:10px 20px;border-bottom:1px solid var(--border);background:var(--bg-card);">' +
       '<button class="tab-btn active" id="btn-vhist">📋 OTs</button>' +
-      '<button class="tab-btn" id="btn-vlogs">⚡ Mttos</button>' +
       '<button class="tab-btn" id="btn-vdocs">📄 Documentos</button>' +
       '<button class="tab-btn" id="btn-vinsp">🔍 Inspección</button>' +
       '<button class="tab-btn" id="btn-vprev">⚙️ Config.</button>' +
@@ -686,7 +690,6 @@ var VehiclesModule = (function () {
         '</tbody></table></div>') +
       '</div>' + // End sec-vhist
 
-      '<div id="sec-vlogs" style="display:none;"></div>' +
       '<div id="sec-vdocs" style="display:none;"></div>' +
       '<div id="sec-vinsp" style="display:none;"></div>' +
       '<div id="sec-vprev" style="display:none;"></div>' +
@@ -700,13 +703,12 @@ var VehiclesModule = (function () {
 
     // Set up tabs
     document.getElementById('btn-vhist').onclick = function () { setActiveTab('vhist'); };
-    document.getElementById('btn-vlogs').onclick = function () { setActiveTab('vlogs'); renderMaintenanceLog(id); };
     document.getElementById('btn-vdocs').onclick = function () { setActiveTab('vdocs'); renderVehicleDocs(id); };
     document.getElementById('btn-vinsp').onclick = function () { setActiveTab('vinsp'); renderInspections(id); };
     document.getElementById('btn-vprev').onclick = function () { setActiveTab('vprev'); renderVehicleRoutines(id); };
 
     function setActiveTab(tab) {
-      ['vhist', 'vlogs', 'vdocs', 'vinsp', 'vprev'].forEach(function (t) {
+      ['vhist', 'vdocs', 'vinsp', 'vprev'].forEach(function (t) {
         var btn = document.getElementById('btn-' + t);
         var sec = document.getElementById('sec-' + t);
         if (btn) btn.classList.toggle('active', t === tab);
@@ -715,32 +717,9 @@ var VehiclesModule = (function () {
     }
   }
 
-  function renderMaintenanceLog(vehicleId) {
-    var logs = DB.getAll('maintenanceLogs').filter(function (l) { return l.vehicleId === vehicleId; });
-    var target = document.getElementById('sec-vlogs');
-    if (!target) return;
-
-    var html = '<h4 style="margin-bottom:16px;">Bitácora de Mantenimientos Exprés</h4>';
-    if (!logs.length) {
-      html += '<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">⚡</div><p>No hay mantenimientos directos registrados.</p></div>';
-    } else {
-      html += '<div class="table-wrapper"><table><thead><tr>' +
-        '<th>Fecha</th><th>Rutina</th><th>Horas</th><th>Costo</th><th>Personal / Notas</th><th>Acciones</th>' +
-        '</tr></thead><tbody>' +
-        logs.slice().reverse().map(function (l) {
-          return '<tr>' +
-            '<td>' + Utils.formatDate(l.date) + '</td>' +
-            '<td><strong>' + Utils.escapeHtml(l.routineName) + '</strong></td>' +
-            '<td>' + Utils.fmtNum(l.hours) + ' hrs</td>' +
-            '<td style="font-weight:700;color:var(--color-success);">$ ' + Utils.fmtNum(l.totalCost) + '</td>' +
-            '<td><div class="text-xs">' + Utils.escapeHtml(l.notes || 'Sin notas') + '</div></td>' +
-            '<td><button class="btn btn-ghost btn-sm" style="color:var(--color-danger);" onclick="VehiclesModule.deleteMaintenanceLog(\'' + l.id + '\',\'' + vehicleId + '\')">🗑️ Anular</button></td>' +
-            '</tr>';
-        }).join('') +
-        '</tbody></table></div>';
-    }
-    target.innerHTML = html;
-  }
+  // [REMOVED v3.0] renderMaintenanceLog() eliminada.
+  // La Bitácora Exprés fue reemplazada por Órdenes de Trabajo (OTs).
+  // Los registros históricos en maintenanceLogs permanecen en Firestore.
 
   function renderVehicleDocs(vehicleId) {
     var target = document.getElementById('sec-vdocs');
@@ -830,7 +809,7 @@ var VehiclesModule = (function () {
         var isToday = insp.date === today;
         html += '<tr>' +
           '<td><strong>' + Utils.formatDate(insp.date) + (isToday ? ' <span class="badge badge-cyan">Hoy</span>' : '') + '</strong></td>' +
-          '<td>' + Utils.fmtNum(insp.km || 0) + ' hrs</td>' +
+          '<td>' + Utils.fmtNum(insp.hours || 0) + ' hrs</td>' +
           '<td>' + overallBadge + '</td>' +
           '<td class="text-sm" style="color:var(--color-danger);max-width:200px;">' + failText + '</td>' +
           '<td class="text-sm text-muted">' + Utils.escapeHtml(insp.notes || '—') + '</td>' +
@@ -889,7 +868,7 @@ var VehiclesModule = (function () {
       var existingDocs = DB.getAll('vehicleDocuments').filter(function (d) {
         return d.vehicleId === vehicleId && d.type === type;
       });
-      
+
       if (existingDocs.length > 0) {
         Utils.toast('⚠️ Operación bloqueada: Ya existe un documento de este tipo. Elimínalo primero para registrar uno nuevo.', 'error');
         return;
@@ -904,7 +883,7 @@ var VehiclesModule = (function () {
         createdAt: Utils.todayISO()
       });
       Utils.toast(DOC_TYPE_NAMES[type] + ' registrado correctamente.', 'success');
-      
+
       close();
       renderVehicleDocs(vehicleId);
     };
@@ -990,37 +969,12 @@ var VehiclesModule = (function () {
     };
   }
 
-  function deleteMaintenanceLog(logId, vehicleId) {
-    var log = DB.getAll('maintenanceLogs').find(function (l) { return l.id === logId; });
-    if (!log) return;
-
-    Utils.confirm('¿Anular este registro de mantenimiento? Los repuestos usados serán devueltos al inventario.', 'Anular Registro', function () {
-      // 1. Revert stock
-      (log.materialsUsed || []).forEach(function (m) {
-        var item = DB.getById('items', m.id);
-        if (item) DB.update('items', m.id, { stock: item.stock + m.qty });
-        DB.create('movements', {
-          itemId: m.id, itemName: m.name, type: 'entrada', qty: m.qty,
-          date: Utils.todayISO(), reference: 'ANULACION', notes: 'Reversión por anulación de: ' + log.routineName,
-          userId: DB.getSettings().activeUserId
-        });
-      });
-      // 2. Remove log
-      DB.remove('maintenanceLogs', logId);
-      syncVehicleOdometer(vehicleId);
-
-      Utils.toast('Registro anulado y stock revertido.', 'success');
-      renderMaintenanceLog(vehicleId);
-      render(); // Refresh main dashboard
-    }, true);
-  }
-
-  function promptUpdateKm(id) {
+  function promptUpdateHrs(id) {
     var v = DB.getById('vehicles', id);
     if (!v) return;
 
-    var old = document.getElementById('upd-km-modal'); if (old) old.remove();
-    var html = '<div class="modal-overlay" id="upd-km-modal"><div class="modal modal-sm">' +
+    var old = document.getElementById('upd-hr-modal'); if (old) old.remove();
+    var html = '<div class="modal-overlay" id="upd-hr-modal"><div class="modal modal-sm">' +
       '<div class="modal-header"><h3>⏱️ Actualizar Horómetro</h3><button class="modal-close" id="ukm-close">✕</button></div>' +
       '<div class="modal-body">' +
       '<p class="text-sm text-muted" style="margin-bottom:12px;">Ingrese el nuevo valor del horómetro (Horas acumuladas) para <strong>' + Utils.escapeHtml(v.plate) + '</strong>:</p>' +
@@ -1030,7 +984,7 @@ var VehiclesModule = (function () {
       '</div></div>';
 
     document.body.insertAdjacentHTML('beforeend', html);
-    var ov = document.getElementById('upd-km-modal');
+    var ov = document.getElementById('upd-hr-modal');
     var close = function () { ov.remove(); };
     document.getElementById('ukm-close').onclick = close;
     document.getElementById('ukm-can').onclick = close;
@@ -1044,7 +998,7 @@ var VehiclesModule = (function () {
       }
       DB.update('vehicles', id, { hours: newHours });
       Utils.toast('Horómetro actualizado.', 'success');
-      var kmLbl = document.getElementById('v-km-lbl');
+      var kmLbl = document.getElementById('v-hrs-lbl');
       if (kmLbl) kmLbl.textContent = Utils.fmtNum(newHours) + ' hrs';
       close();
       render(); // Update dashboard behind
@@ -1193,12 +1147,12 @@ var VehiclesModule = (function () {
 
     document.getElementById('rt-sv').onclick = function () {
       var name = document.getElementById('rt-name').value.trim();
-      var fkm = parseFloat(document.getElementById('rt-fkm').value);
+      var fhr = parseFloat(document.getElementById('rt-fkm').value);
       var fdays = parseInt(document.getElementById('rt-fdays').value);
-      var lkm = parseFloat(document.getElementById('rt-lkm').value);
+      var lhr = parseFloat(document.getElementById('rt-lkm').value);
       var ldate = document.getElementById('rt-ldate').value;
 
-      if (!name || !fkm || !fdays || isNaN(lkm) || !ldate) {
+      if (!name || !fhr || !fdays || isNaN(lkm) || !ldate) {
         Utils.toast('Todos los campos son obligatorios y numéricos.', 'warning'); return;
       }
 
@@ -1549,7 +1503,7 @@ var VehiclesModule = (function () {
         '<p>Haz clic en <strong>📋 Nuevo Tiquete</strong> para registrar la primera carga de combustible.</p>' +
         '</div>';
     } else {
-      // Calcular km recorridos entre tiquetes por vehículo
+      // Calcular hr recorridos entre tiquetes por vehículo
       var vehLogsSorted = {};
       allFuelLogs.forEach(function (l) {
         if (!vehLogsSorted[l.vehicleId]) vehLogsSorted[l.vehicleId] = [];
@@ -1666,7 +1620,7 @@ var VehiclesModule = (function () {
         var ms = isVehicleInMaintenance(v.id);
         var disabled = ms.inMaintenance ? ' disabled' : '';
         var suffix = ms.inMaintenance ? ' 🔴 EN MANTENIMIENTO — NO DISPONIBLE' : '';
-        return '<option value="' + v.id + '"' + (preselectedVehicleId === v.id ? ' selected' : '') + disabled + ' data-plate="' + Utils.escapeHtml(v.plate) + '" data-name="' + Utils.escapeHtml((v.brand || '') + ' ' + (v.model || '') + ' ' + v.year) + '" data-km="' + (v.hours || 0) + '">' +
+        return '<option value="' + v.id + '"' + (preselectedVehicleId === v.id ? ' selected' : '') + disabled + ' data-plate="' + Utils.escapeHtml(v.plate) + '" data-name="' + Utils.escapeHtml((v.brand || '') + ' ' + (v.model || '') + ' ' + v.year) + '" data-hr="' + (v.hours || 0) + '">' +
           Utils.escapeHtml(v.plate + ' — ' + (v.brand || '') + ' ' + (v.model || '') + ' ' + v.year) + suffix + '</option>';
       }).join('') +
       '</select>' +
@@ -1710,29 +1664,29 @@ var VehiclesModule = (function () {
     var inpGal = document.getElementById('ftic-gal');
     var inpPrice = document.getElementById('ftic-price');
     var inpCost = document.getElementById('ftic-cost');
-    var inpKm = document.getElementById('ftic-hrs');
+    var inpHrs = document.getElementById('ftic-hrs');
     var selVeh = document.getElementById('ftic-veh');
     var warnDiv = document.getElementById('ftic-maint-warn');
     var yieldInfo = document.getElementById('ftic-yield-info');
 
-    // Prellenar km cuando se selecciona vehículo
+    // Prellenar hr cuando se selecciona vehículo
     selVeh.onchange = function () {
       var opt = selVeh.options[selVeh.selectedIndex];
-      var hours = opt.getAttribute('data-km'); // El atributo se llama data-km pero contiene horas
-      if (hours) inpKm.value = hours;
+      var hours = opt.getAttribute('data-hr'); // El atributo se llama data-hr pero contiene horas
+      if (hours) inpHrs.value = hours;
       // Advertencia de mantenimiento
       if (opt.disabled) {
         warnDiv.style.display = 'block';
       } else {
         warnDiv.style.display = 'none';
       }
-      updateCalc('km');
+      updateCalc('hr');
     };
 
-    // Prellenar km del vehículo preseleccionado
+    // Prellenar hr del vehículo preseleccionado
     if (preselectedVehicleId) {
       var v = DB.getById('vehicles', preselectedVehicleId);
-      if (v) inpKm.value = v.hours || 0;
+      if (v) inpHrs.value = v.hours || 0;
     }
 
     function updateCalc(source) {
@@ -1751,7 +1705,7 @@ var VehiclesModule = (function () {
         var v = DB.getById('vehicles', vid);
         var vLogs = allFuelLogs.filter(function (l) { return l.vehicleId === vid; }).sort(function (a, b) { return a.hours < b.hours ? -1 : 1; });
         var lastLog = vLogs.length ? vLogs[vLogs.length - 1] : null;
-        var hrsInput = parseFloat(inpKm.value) || 0;
+        var hrsInput = parseFloat(inpHrs.value) || 0;
 
         if (lastLog && hrsInput > lastLog.hours && gal > 0) {
           var diff = hrsInput - lastLog.hours;
@@ -1787,13 +1741,13 @@ var VehiclesModule = (function () {
     inpGal.oninput = function () { updateCalc('gal'); };
     inpPrice.oninput = function () { updateCalc('price'); };
     inpCost.oninput = function () { updateCalc('cost'); };
-    inpKm.oninput = function () { updateCalc('km'); };
+    inpHrs.oninput = function () { updateCalc('hr'); };
 
     document.getElementById('ftic-save').onclick = function () {
       var ticketNum = document.getElementById('ftic-num').value.trim();
       var date = document.getElementById('ftic-date').value;
       var vid = selVeh.value;
-      var hours = Math.max(0, parseFloat(inpKm.value) || 0);
+      var hours = Math.max(0, parseFloat(inpHrs.value) || 0);
       var gallons = Math.max(0, parseFloat(inpGal.value) || 0);
       var price = Math.max(0, parseFloat(inpPrice.value) || 0);
       var cost = Math.max(0, parseFloat(inpCost.value) || 0);
@@ -1933,7 +1887,7 @@ var VehiclesModule = (function () {
     if (combFilterVehicle) logs = logs.filter(function (l) { return l.vehicleId === combFilterVehicle; });
     logs.sort(function (a, b) { return b.date < a.date ? -1 : 1; });
 
-    // Km recorridos
+    // hr recorridos
     var vehLogsSorted = {};
     allFuelLogs.forEach(function (l) {
       if (!vehLogsSorted[l.vehicleId]) vehLogsSorted[l.vehicleId] = [];
@@ -2008,7 +1962,7 @@ var VehiclesModule = (function () {
       '<div style="display:flex; align-items:center; gap:12px;">' +
       '<div style="text-align:right;">' +
       '<div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Mes y Año</div>' +
-      '<input type="month" id="km-date-sel" value="' + selYear + '-' + String(selMonth).padStart(2, '0') + '" max="' + today.substring(0, 7) + '" ' +
+      '<input type="month" id="hr-date-sel" value="' + selYear + '-' + String(selMonth).padStart(2, '0') + '" max="' + today.substring(0, 7) + '" ' +
       'style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-md); padding:8px 12px; color:var(--text-primary); font-size:0.95rem; outline:none;">' +
       '</div>' +
       '</div>' +
@@ -2020,7 +1974,7 @@ var VehiclesModule = (function () {
     }
 
     html += '<div class="table-wrapper" style="overflow-x:auto; max-width:100%; padding-bottom:10px;">' +
-      '<table id="km-matrix-table" style="min-width:max-content; border-collapse:separate; border-spacing:0; width:100%; border-top:1px solid var(--border);">' +
+      '<table id="hr-matrix-table" style="min-width:max-content; border-collapse:separate; border-spacing:0; width:100%; border-top:1px solid var(--border);">' +
       '<thead><tr>' +
       '<th style="position:sticky; left:0; background:var(--bg-card); z-index:2; border-right:2px solid var(--border); border-bottom:1px solid var(--border); box-shadow: 2px 0 5px rgba(0,0,0,0.05); text-align:left; padding:12px 16px;">Placa / Vehículo</th>';
 
@@ -2050,13 +2004,13 @@ var VehiclesModule = (function () {
         } else if (log) {
           tdStyle += ' background:rgba(34,197,94,0.08);';
           cellContent = '<div style="font-size:0.85rem; font-weight:800; color:var(--color-success); line-height:1.1;">+' + Utils.fmtNum(log.workedHours || 0) + '</div>' +
-            '<div style="font-size:0.65rem; color:var(--text-muted); margin-top:2px;">' + Utils.fmtNum(log.totalHours || log.km || 0) + '</div>';
+            '<div style="font-size:0.65rem; color:var(--text-muted); margin-top:2px;">' + Utils.fmtNum(log.totalHours || log.hours || 0) + '</div>';
         } else {
           tdStyle += ' background:rgba(239,68,68,0.02);';
           cellContent = '<div style="font-size:1.2rem; color:var(--text-muted); opacity:0.4; line-height:1; user-select:none;">+</div>';
         }
 
-        var dataAttrs = isFuture ? '' : ' data-veh="' + Utils.escapeHtml(v.id) + '" data-date="' + dateStr + '" class="km-cell"';
+        var dataAttrs = isFuture ? '' : ' data-veh="' + Utils.escapeHtml(v.id) + '" data-date="' + dateStr + '" class="hr-cell"';
         html += '<td style="' + tdStyle + '" ' + dataAttrs + ' title="' + dateStr + ' | ' + Utils.escapeHtml(v.plate) + '">' + cellContent + '</td>';
       });
       html += '</tr>';
@@ -2067,7 +2021,7 @@ var VehiclesModule = (function () {
     return html;
   }
 
-  function showKmEntryModal(vehicleId, dateContext) {
+  function showHrEntryModal(vehicleId, dateContext) {
     var v = DB.getById('vehicles', vehicleId);
     if (!v) return;
     var today = Utils.todayISO();
@@ -2075,7 +2029,7 @@ var VehiclesModule = (function () {
     var allLogs = DB.getAll('hoursLogs');
     var existingLog = allLogs.find(function (l) { return l.vehicleId === vehicleId && l.date === defaultDate; });
 
-    // Km base: el total acumulado hasta ayer
+    // hr base: el total acumulado hasta ayer
     var prevLog = allLogs
       .filter(function (l) { return l.vehicleId === vehicleId && l.date < defaultDate; })
       .sort(function (a, b) { return b.date < a.date ? -1 : 1; })[0];
@@ -2125,7 +2079,7 @@ var VehiclesModule = (function () {
       '</div>' +
       '</div>' +
 
-      // Entrada: KM RECORRIDOS HOY (no el odómetro total)
+      // Entrada: hr RECORRIDOS HOY (no el odómetro total)
       '<div class="form-group">' +
       '<label style="font-size:0.95rem;font-weight:700;">⏱️ Horas trabajadas hoy</label>' +
       '<input type="number" id="km-entry-value" class="form-control" value="' + existingTraveled + '" min="0" placeholder="Ej: 8" ' +
@@ -2156,20 +2110,20 @@ var VehiclesModule = (function () {
     document.getElementById('km-modal-cancel').onclick = close;
     ov.onclick = function (e) { if (e.target === ov) close(); };
 
-    var inpKm = document.getElementById('km-entry-value');
+    var inpHrs = document.getElementById('km-entry-value');
     var totalDiv = document.getElementById('km-entry-total');
     function updateTotal() {
-      var traveled = parseFloat(inpKm.value) || 0;
+      var traveled = parseFloat(inpHrs.value) || 0;
       var newTotal = baseHours + traveled;
       totalDiv.textContent = Utils.fmtNum(newTotal) + ' hrs';
       totalDiv.style.color = traveled > 0 ? 'var(--color-success)' : 'var(--text-muted)';
     }
-    inpKm.oninput = updateTotal;
+    inpHrs.oninput = updateTotal;
     updateTotal();
 
     document.getElementById('km-modal-save').onclick = function () {
       var date = document.getElementById('km-entry-date').value;
-      var workedHours = parseFloat(inpKm.value) || 0;
+      var workedHours = parseFloat(inpHrs.value) || 0;
       var notes = document.getElementById('km-entry-notes').value.trim();
 
       // Validaciones
@@ -2193,7 +2147,7 @@ var VehiclesModule = (function () {
         DB.create('hoursLogs', { vehicleId: vehicleId, date: date, workedHours: workedHours, totalHours: totalHours, notes: notes, createdAt: today });
       }
 
-      // Actualizar km maestro del vehículo de manera segura (solo incrementar)
+      // Actualizar hr maestro del vehículo de manera segura (solo incrementar)
       if (totalHours > (v.hours || 0)) {
         DB.update('vehicles', vehicleId, { hours: totalHours });
       }
@@ -2204,7 +2158,7 @@ var VehiclesModule = (function () {
     };
   }
 
-  function deleteKmLog(logId) {
+  function deleteHrLog(logId) {
     Utils.confirm('¿Eliminar este registro de horómetro?', 'Eliminar Registro', function () {
       var log = DB.getAll('hoursLogs').find(function (l) { return l.id === logId; });
       DB.remove('hoursLogs', logId);
@@ -2220,19 +2174,19 @@ var VehiclesModule = (function () {
   //  Sincronizador Maestro de Odómetro
   // ══════════════════════════════════════════════════════════
   function syncVehicleOdometer(vehicleId) {
-    var maxKm = 0;
+    var maxhr = 0;
     // 1. Logs diarios
-    DB.getAll('hoursLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.totalHours > maxKm) maxKm = l.totalHours; });
+    DB.getAll('hoursLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.totalHours > maxKm) maxhr = l.totalHours; });
     // 2. Combustible
-    DB.getAll('fuelLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxKm = l.hours; });
+    DB.getAll('fuelLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
     // 3. Mantenimientos
-    DB.getAll('maintenanceLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxKm = l.hours; });
+    DB.getAll('maintenanceLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
     // 4. Inspecciones
-    DB.getAll('vehicleInspections').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxKm = l.hours; });
+    DB.getAll('vehicleInspections').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
 
     var v = DB.getById('vehicles', vehicleId);
-    if (v && maxKm > (v.hours || 0)) {
-      DB.update('vehicles', vehicleId, { hours: maxKm });
+    if (v && maxhr > (v.hours || 0)) {
+      DB.update('vehicles', vehicleId, { hours: maxhr });
     }
   }
 
@@ -2246,12 +2200,12 @@ var VehiclesModule = (function () {
     getVehicleSelector: getVehicleSelector,
     getVehicleLabel: getVehicleLabel,
     TYPE_ICONS: TYPE_ICONS,
-    promptUpdateKm: promptUpdateKm,
+    promptUpdateHrs: promptUpdateHrs,
     renderPreventivos: renderPreventivos,
     showRoutineModal: showRoutineModal,
     deleteRoutine: deleteRoutine,
     showQuickMaintenanceModal: showQuickMaintenanceModal,
-    deleteMaintenanceLog: deleteMaintenanceLog,
+
     showDocumentModal: showDocumentModal,
     deleteDocument: deleteDocument,
     showFuelModal: showFuelTicketModal,
@@ -2259,8 +2213,8 @@ var VehiclesModule = (function () {
     showInspectionModal: showInspectionModal,
     deleteInspection: deleteInspection,
     showAssignDriverModal: showAssignDriverModal,
-    showKmEntryModal: showKmEntryModal,
-    deleteKmLog: deleteKmLog,
+    showHrEntryModal: showHrEntryModal,
+    deleteHrLog: deleteHrLog,
     isVehicleInMaintenance: isVehicleInMaintenance,
     _rmQMat: function (idx) { /* sobreescrito por showQuickMaintenanceModal */ }
   };

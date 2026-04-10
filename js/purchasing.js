@@ -76,7 +76,7 @@ var PurchasingModule = (function () {
             '<td class="text-secondary">' + s.item.minStock + ' ' + s.item.unit + '</td>' +
             '<td style="color:var(--color-warning);font-weight:600;">' + (s.demand > 0 ? s.demand + ' unid.' : '—') + '</td>' +
             '<td><strong>+' + s.suggested + '</strong></td>' +
-            '<td><button class="btn btn-success btn-sm" onclick="App.go(\'inventory\');setTimeout(function(){InventoryModule.showMovementModal(\'' + Utils.escapeHtml(s.item.id) + '\',\'entrada\')},100)">📦 Ingresar</button></td>' +
+            '<td><button class="btn btn-success btn-sm" onclick="App.go(\'inventory\'); InventoryModule.showMovementModal(\'' + Utils.escapeHtml(s.item.id) + '\',\'entrada\');">📦 Ingresar</button></td>' +
             '</tr>';
         }).join('') +
         '</tbody></table></div></div>';

@@ -17,6 +17,13 @@
 - **Conexión Continua**: Se configuró el repositorio de GitHub para que cualquier cambio se refleje en la web oficial en menos de 60 segundos. 🛰️🏗️🔄
 - **Sincronización Masiva**: Se habilitó el botón de "Subida Inicial" para migrar todo tu inventario histórico desde tu PC a la nube por primera vez. 🌩️⬆️
 
+### 4. Saneamiento Técnico de OTs (Fase 1) 🧹🔧
+- **Unificación de Cierre:** El botón de cierre de OT ahora abre el modal financiero correcto desde el Área de Taller. 🏁
+- **Horómetro Inteligente:** Se eliminó la petición manual del "Horómetro Final" en el cierre financiero. El sistema lee automáticamente las horas registradas en el "Horómetro Diario" actualizando la rutina preventina sin intervención adicional. ⏲️
+- **Interfaz Limpia:** Se eliminó la obsoleta "Bitácora Exprés" del historial vehicular, ubicando toda la historia en el flujo estructurado de OTs. ✨
+
+![Verificación de UI de Fase 1](file:///C:/Users/Luis%20Diaz/.gemini/antigravity/brain/83abdee0-af91-47a8-b8c9-18fafefcc376/verify_phase1_1775780048203.webp)
+
 ---
 
 ## 🛡️ Verificación Técnica Final

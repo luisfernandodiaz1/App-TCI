@@ -162,12 +162,13 @@ var WorkshopModule = (function () {
     var timeLabel = daysOpen === 0 ? 'Hoy' : 'Hace ' + daysOpen + ' d';
     var priorityColor = wo.priority === 'alta' ? '#ef4444' : (wo.priority === 'media' ? '#f59e0b' : '#10b981');
 
-    // Badge especial para OTs preventivas
-    var prevBadgeHtml = wo.isPreventive
-      ? '<div style="margin-bottom:6px;padding:4px 8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:6px;font-size:0.72rem;font-weight:700;color:var(--color-warning);">📅 Preventivo: ' + Utils.escapeHtml(wo.routineName || 'Rutina') + '</div>'
+    // Badge especial para OTs preventivas (solo si tienen rutina asignada)
+    var isVerifiedPreventive = wo.isPreventive && wo.routineName;
+    var prevBadgeHtml = isVerifiedPreventive
+      ? '<div style="margin-bottom:6px;padding:4px 8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:6px;font-size:0.72rem;font-weight:700;color:var(--color-warning);">📅 Preventivo: ' + Utils.escapeHtml(wo.routineName) + '</div>'
       : '';
 
-    var html = '<div class="kanban-card" style="border-left:4px solid ' + priorityColor + '; box-shadow: 0 4px 12px rgba(0,0,0,0.1);' + (wo.isPreventive ? 'border-top:2px solid var(--color-warning);' : '') + '">' +
+    var html = '<div class="kanban-card" style="border-left:4px solid ' + priorityColor + '; box-shadow: 0 4px 12px rgba(0,0,0,0.1);' + (isVerifiedPreventive ? 'border-top:2px solid var(--color-warning);' : '') + '">' +
       '<div class="flex justify-between items-center" style="margin-bottom:6px;">' +
       '<span class="kanban-card-num">' + Utils.escapeHtml(wo.number) + '</span>' +
       '<span class="text-xs text-muted" style="font-weight:600;">⏱️ ' + timeLabel + '</span>' +
@@ -491,12 +492,6 @@ var WorkshopModule = (function () {
           return;
         }
 
-        // Poka-Yoke: Si es preventiva, el horómetro es crítico para resetear la rutina
-        if (currentWo.isPreventive) {
-          var horaInicial = currentWo.vehicleHours || 0;
-          // La advertencia se mostrará en el modal de cierre financiero
-        }
-
         var hasPending = (currentWo.materials || []).some(function (m) { return (m.qtyDelivered || 0) < m.qtyRequested; });
         showFinancialCloseModal(currentWo, hasPending, function (finData) {
           var notes = document.getElementById('dlv-notes') ? document.getElementById('dlv-notes').value.trim() : '';
@@ -543,6 +538,9 @@ var WorkshopModule = (function () {
     var matBaseSum = (wo.materials || []).reduce(function (acc, m) { return Utils.dec.add(acc, m.totalBase || 0); }, 0);
     var settings = DB.getSettings();
     var baseHours = settings.monthlyWorkingHours || 220;
+    
+    // Poka-Yoke global reference
+    var vehicleForHoro = DB.getById('vehicles', wo.vehicleId);
 
     // ── Construir lista inicial de mecánicos desde el activityLog ──
     var mechMap = {}; // { empId: { id, name, rate, hours } }
@@ -599,8 +597,7 @@ var WorkshopModule = (function () {
       '<div class="modal-header"><h3>Cierre Financiero: ' + Utils.escapeHtml(wo.number) + '</h3><button class="modal-close" id="fin-close-x">✕</button></div>' +
       '<div class="modal-body">' +
       (hasPending ? '<div class="alert-banner warning" style="margin-bottom:16px;">⚠️ Hay materiales sin entregar en su totalidad.</div>' : '') +
-      // Horómetro para preventivas
-      (wo.isPreventive ? '<div class="form-group"><label style="color:var(--color-warning);font-weight:700;">📏 Horómetro Final (Horas) * <span style="font-size:0.7rem;font-weight:400;">(Obligatorio para actualizar la rutina)</span></label><input class="form-input" type="number" min="' + (wo.vehicleHours || 0) + '" step="0.1" id="fin-horometro-final" value="' + (wo.vehicleHours || 0) + '"></div>' : '') +
+
       // Tabla de mecánicos
       '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
@@ -708,15 +705,17 @@ var WorkshopModule = (function () {
     document.getElementById('fin-cancel').onclick = closeFin;
 
     document.getElementById('fin-confirm').onclick = function () {
-      var horoFinalEl = document.getElementById('fin-horometro-final');
-      var horoFinal = horoFinalEl ? (parseFloat(horoFinalEl.value) || 0) : 0;
       var ext = parseInt((document.getElementById('fin-ext') || {}).value) || 0;
 
       if (ext < 0) { Utils.toast('Los costos no pueden ser negativos.', 'error'); return; }
 
-      if (wo.isPreventive && horoFinal <= (wo.vehicleHours || 0)) {
-        Utils.toast('⚠️ Para OTs preventivas, el Horómetro Final debe ser mayor al inicial (' + (wo.vehicleHours || 0) + ' hrs).', 'warning');
-        return;
+      // Leer horómetro actual del usuario (ya que el automático puede no haberse actualizado)
+      var hrInputEl = document.getElementById('fin-hr-final');
+      var horoFinal = hrInputEl ? parseFloat(hrInputEl.value) || 0 : (vehicleForHoro ? vehicleForHoro.hours || 0 : 0);
+      
+      // Actualizar el vehículo globalmente para evitar desajustes futuros
+      if (vehicleForHoro && horoFinal > (vehicleForHoro.hours || 0)) {
+        DB.update('vehicles', wo.vehicleId, { hours: horoFinal });
       }
 
       // Recolectar entradas de labor
