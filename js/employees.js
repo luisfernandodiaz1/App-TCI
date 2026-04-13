@@ -160,13 +160,37 @@ var EmployeesModule = (function () {
 
   function deleteEmployee(id) {
     var emp = DB.getById('employees', id);
+    if (!emp) return;
     
-    // Poka-Yoke: Bloquear eliminación si tiene trabajos pendientes
-    var pendingWOs = DB.getAll('workOrders').filter(function (w) {
-      return w.assignedTo === id && ['emitida', 'en_proceso', 'esperando_repuestos'].indexOf(w.status) !== -1;
+    // 🛡️ BLINDAJE DE BORRADO (V1.5): Integridad Referencial Histórica
+    
+    // 1. Verificar en WorkOrders (Asignado o en laborEntries)
+    var hasWOHistory = DB.getAll('workOrders').some(function (w) {
+      var isAssigned = w.assignedTo === id;
+      var isInEntries = (w.laborEntries || []).some(function (e) { 
+        return e.employeeId === id || e.id === id; 
+      });
+      var isInLog = (w.activityLog || []).some(function (log) { return log.userId === id; });
+      return isAssigned || isInEntries || isInLog;
     });
-    if (pendingWOs.length > 0) {
-      Utils.toast('⚠️ Bloqueo: El técnico tiene trabajos pendientes. Entregue las OTs antes de eliminarlo.', 'warning');
+
+    // 2. Verificar en MaintenanceLogs
+    var hasMaintHistory = DB.getAll('maintenanceLogs').some(function (l) {
+      return l.userId === id || (l.materialsUsed || []).some(function(m) { return m.requestedBy === id; });
+    });
+
+    // 3. Verificar en FuelLogs (Conductor)
+    var hasFuelHistory = DB.getAll('fuelLogs').some(function (f) {
+      return f.userId === id || f.driverId === id; // userId suele ser quien registra, driverId el responsable
+    });
+
+    // 4. Verificar en VehicleInspections
+    var hasInspHistory = (DB.getAll('vehicleInspections') || []).some(function (i) {
+      return i.userId === id;
+    });
+
+    if (hasWOHistory || hasMaintHistory || hasFuelHistory || hasInspHistory) {
+      Utils.toast("❌ Error de Integridad: Este empleado tiene registro histórico en el sistema (OTs, Bitácora o Inspecciones). Inactívelo en su lugar para preservar la validez de los reportes.", "error", 6000);
       return;
     }
 

@@ -39,7 +39,7 @@ var App = (function () {
       console.log('Reparando datos de combustible y documentos...');
       var daysAgo = function (n) {
         var d = new Date(); d.setDate(d.getDate() - n);
-        return d.toISOString().split('T')[0];
+        return Utils.toLocalISO(d);
       };
       if (!fuels.length) {
         DB.create('fuelLogs', { id: 'fl1', vehicleId: 'vh1', date: daysAgo(5), hours: 12450, gallons: 15.5, pricePerGal: 15000, cost: 232500, fuelType: 'Diesel / ACPM', station: 'Texaco Norte', fullTank: true });
@@ -218,6 +218,7 @@ var App = (function () {
   // ── Dashboard ──────────────────────────────────────────────
   function renderDashboard() {
     var data;
+    try {
     if (_dashboardCache) {
       data = _dashboardCache;
     } else {
@@ -240,7 +241,7 @@ var App = (function () {
       var last7Labels = [];
       for (var d = 6; d >= 0; d--) {
         var dt = new Date(); dt.setDate(dt.getDate() - d);
-        var ds = dt.toISOString().split('T')[0];
+        var ds = Utils.toLocalISO(dt);
         var dayVal = movs.filter(function (m) { return m.date === ds && m.type === 'salida'; }).reduce(function (a, m) { return Utils.dec.add(a, m.totalCost || 0); }, 0);
         last7.push(dayVal);
         last7Labels.push(['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][dt.getDay()]);
@@ -254,11 +255,11 @@ var App = (function () {
         var hoursDiff = (r.lastPerformedHours + r.frequencyHours) - (v.hours || 0);
         var daysDiff = -1;
         if (r.lastPerformedDate) {
-          var prevDate = new Date(r.lastPerformedDate);
-          if (!isNaN(prevDate.getTime())) {
-            var nextDate = new Date(prevDate.getTime() + (r.frequencyDays * 24 * 60 * 60 * 1000));
-            daysDiff = Math.floor((nextDate - new Date()) / (1000 * 60 * 60 * 24));
-          }
+          var nextDate = new Date(r.lastPerformedDate + 'T00:00:00');
+          nextDate.setDate(nextDate.getDate() + (r.frequencyDays || 0));
+          var todayObj = new Date();
+          todayObj.setHours(0,0,0,0);
+          daysDiff = Math.round((nextDate - todayObj) / 864e5);
         }
         if (hoursDiff <= 0 || daysDiff <= 0) dueRoutinesCount++;
       });
@@ -270,18 +271,34 @@ var App = (function () {
       var avgHoursToday = activeVehs.length > 0 ? (todayLogs.reduce(function (acc, l) { return acc + (l.workedHours || 0); }, 0) / activeVehs.length) : 0;
 
       data = {
-        inventoryValue: '$ ' + Utils.fmtNum(items.reduce(function (acc, i) { return Utils.dec.add(acc, Utils.dec.mul(Number(i.unitCost) || 0, Number(i.stock) || 0)); }, 0)),
+        inventoryValue: '$ ' + Utils.fmtNum(items.reduce(function (acc, i) { 
+          return Utils.dec.add(acc, Utils.dec.mul(Utils.safeNum(i.unitCost), Utils.safeNum(i.stock))); 
+        }, 0)),
         inventoryConsumption: '$ ' + Utils.fmtNum(
-          movs.filter(function (m) { return m.type === 'salida' && m.date && m.date.length >= 7 && m.date.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, m) { return acc + (Number(m.totalCost) || 0); }, 0)
+          movs.filter(function (m) { 
+            return m.type === 'salida' && m.date && m.date.substring(0, 7) === Utils.todayISO().substring(0, 7); 
+          }).reduce(function (acc, m) { return Utils.dec.add(acc, Utils.safeNum(m.totalCost)); }, 0)
         ),
         operatingExpense: '$ ' + Utils.fmtNum(
-          wos.filter(function (w) { return w.status === 'completada' && w.closedAt && w.closedAt.length >= 7 && w.closedAt.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, w) { return acc + (Number(w.totalCost) || 0); }, 0) +
-          (DB.getAll('maintenanceLogs') || []).filter(function (l) { return l.date && l.date.length >= 7 && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, l) { return acc + (Number(l.totalCost) || 0); }, 0) +
-          (DB.getAll('fuelLogs') || []).filter(function (l) { return l.date && l.date.length >= 7 && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); }).reduce(function (acc, l) { return acc + (Number(l.cost) || 0); }, 0) +
-          (DB.getAll('vehicleDocuments') || []).filter(function (d) {
-            var dt = d.updatedAt || d.createdAt;
-            return dt && dt.length >= 7 && dt.substring(0, 7) === Utils.todayISO().substring(0, 7);
-          }).reduce(function (acc, d) { return acc + (Number(d.cost) || 0); }, 0)
+          Utils.dec.add(
+            wos.filter(function (w) { 
+              return w.status === 'completada' && w.closedAt && w.closedAt.substring(0, 7) === Utils.todayISO().substring(0, 7); 
+            }).reduce(function (acc, w) { return Utils.dec.add(acc, Utils.safeNum(w.totalCost)); }, 0),
+            Utils.dec.add(
+              (DB.getAll('maintenanceLogs') || []).filter(function (l) { 
+                return l.date && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); 
+              }).reduce(function (acc, l) { return Utils.dec.add(acc, Utils.safeNum(l.totalCost)); }, 0),
+              Utils.dec.add(
+                (DB.getAll('fuelLogs') || []).filter(function (l) { 
+                  return l.date && l.date.substring(0, 7) === Utils.todayISO().substring(0, 7); 
+                }).reduce(function (acc, l) { return Utils.dec.add(acc, Utils.safeNum(l.cost)); }, 0),
+                (DB.getAll('vehicleDocuments') || []).filter(function (d) {
+                  var dt = d.updatedAt || d.createdAt;
+                  return dt && dt.substring(0, 7) === Utils.todayISO().substring(0, 7);
+                }).reduce(function (acc, d) { return Utils.dec.add(acc, Utils.safeNum(d.cost)); }, 0)
+              )
+            )
+          )
         ),
         avgUsage: Utils.fmtNum(avgHoursToday) + ' hrs/v',
         missingHours: missingHoursToday,
@@ -351,33 +368,46 @@ var App = (function () {
 
     document.getElementById('section-dashboard').innerHTML = html;
 
-    Utils.afterRender('dash-chart', function () {
-      var ctx = document.getElementById('dash-chart');
-      if (ctx && window.Chart) {
-        new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: data.last7Labels,
-            datasets: [{
-              label: 'Consumo Diario ($)',
-              data: data.last7,
-              backgroundColor: 'rgba(56, 189, 248, 0.9)',
-              borderRadius: 4
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              x: { grid: { display: false } },
-              y: { beginAtZero: true, ticks: { stepSize: 1 } }
+      Utils.afterRender('dash-chart', function () {
+        var ctx = document.getElementById('dash-chart');
+        if (ctx && window.Chart) {
+          new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: data.last7Labels,
+              datasets: [{
+                label: 'Consumo Diario ($)',
+                data: data.last7,
+                backgroundColor: 'rgba(56, 189, 248, 0.9)',
+                borderRadius: 4
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true }
+              }
             }
-          }
-        });
-      } else if (ctx) {
-        Utils.drawBarChart('dash-chart', data.last7Labels, data.last7, 'rgba(56, 189, 248, 0.9)');
-      }
-    });
+          });
+        } else if (ctx) {
+          Utils.drawBarChart('dash-chart', data.last7Labels, data.last7, 'rgba(56, 189, 248, 0.9)');
+        }
+      });
+    } catch (e) {
+      console.error('Crash en Dashboard:', e);
+      document.getElementById('section-dashboard').innerHTML = 
+        '<div class="card" style="border:2px solid var(--color-danger);padding:20px;">' +
+        '<h3 style="color:var(--color-danger);">🛑 Error de Renderizado en Dashboard</h3>' +
+        '<p class="text-secondary">Se detectó un fallo crítico al calcular los indicadores financieros o de flota.</p>' +
+        '<div style="background:#1a1a1a;color:#ff5555;padding:12px;border-radius:6px;font-family:monospace;font-size:0.8rem;margin-top:16px;overflow-x:auto;">' +
+        '<strong>Error:</strong> ' + Utils.escapeHtml(e.message) + '<br><br>' +
+        '<strong>Stack:</strong><br>' + Utils.escapeHtml(e.stack).replace(/\n/g, '<br>') +
+        '</div>' +
+        '<button class="btn btn-secondary btn-sm" style="margin-top:16px;" onclick="location.reload()">🔄 Intentar Recargar Aplicación</button>' +
+        '</div>';
+    }
   }
 
   function kpi(icon, label, val, color, sub) {
@@ -402,7 +432,7 @@ var App = (function () {
       return '<div class="alert-banner ' + cls + '" style="margin-bottom:8px;">' +
         '<div style="flex:1;">' +
         '<div class="font-medium">' + Utils.escapeHtml(item.name) + '</div>' +
-        '<div class="text-xs">Stock: <strong>' + item.stock + '</strong> | Mín: ' + item.minStock + ' ' + Utils.escapeHtml(item.unit) + '</div>' +
+        '<div class="text-xs">Stock: <strong>' + Utils.fmtNum(item.stock || 0) + '</strong> | Mín: ' + Utils.fmtNum(item.minStock || 0) + ' ' + Utils.escapeHtml(item.unit) + '</div>' +
         '</div>' +
         '<button class="btn btn-sm" style="background:rgba(255,255,255,0.1);border:none;color:inherit;cursor:pointer;" onclick="InventoryModule.showMovementModal(\'' + item.id + '\',\'entrada\');App.go(\'inventory\')">➕</button>' +
         '</div>';
@@ -468,6 +498,12 @@ var App = (function () {
       '</div>' +
 
       '<div class="card">' +
+      '<div class="card-header"><h3>🛠️ Herramientas de Auditoría</h3></div>' +
+      '<p class="text-secondary text-sm" style="margin-bottom:16px;">Verifica la integridad de tu inventario y la salud de los datos registrados.</p>' +
+      '<button class="btn btn-secondary w-full" id="s-run-diag" style="gap:8px;">🔍 Realizar Diagnóstico de Sistema</button>' +
+      '</div>' +
+
+      '<div class="card">' +
       '<div class="card-header"><h3>💾 Backup & Restore</h3></div>' +
       '<p class="text-secondary text-sm" style="margin-bottom:16px;">Exporta o importa todos los datos de la aplicación en formato JSON.</p>' +
       '<div class="flex gap-3 flex-wrap">' +
@@ -500,6 +536,13 @@ var App = (function () {
     if (cloudBtn) {
       cloudBtn.onclick = function () {
         DB.uploadToCloud();
+      };
+    }
+
+    var diagBtn = document.getElementById('s-run-diag');
+    if (diagBtn) {
+      diagBtn.onclick = function () {
+        DiagnosticsModule.runFullScan();
       };
     }
 

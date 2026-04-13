@@ -431,8 +431,8 @@ var ReportsModule = (function () {
         var monthKey = current.toLocaleString('es-CO', { month: 'long', year: 'numeric' });
         
         // Filtrar OTs de este vehículo en este mes específico
-        var isoStart = effectiveStart.toISOString().split('T')[0];
-        var isoEnd = effectiveEnd.toISOString().split('T')[0];
+        var isoStart = Utils.toLocalISO(effectiveStart);
+        var isoEnd = Utils.toLocalISO(effectiveEnd);
         var monthWOs = DB.getAll('workOrders').filter(function(w) {
           return w.vehicleId === vehicleId && w.status === 'completada' && w.date >= isoStart && w.date <= isoEnd;
         });
@@ -560,8 +560,13 @@ var ReportsModule = (function () {
       var v = vMap[r.vehicleId];
       if (!v) return null;
       var hoursDiff = (r.lastPerformedHours + r.frequencyHours) - (v.hours || 0);
-      var nextDate = new Date(new Date(r.lastPerformedDate).getTime() + r.frequencyDays * 864e5).toISOString().split('T')[0];
-      var daysDiff = Math.floor((new Date(nextDate) - new Date()) / 864e5);
+      var baseDate = new Date(r.lastPerformedDate + 'T00:00:00');
+      baseDate.setDate(baseDate.getDate() + (r.frequencyDays || 0));
+      var nextDate = Utils.toLocalISO(baseDate);
+      
+      var nextDateObj = new Date(nextDate + 'T00:00:00');
+      var todayObj = new Date(); todayObj.setHours(0,0,0,0);
+      var daysDiff = Math.ceil((nextDateObj - todayObj) / 864e5);
       var isDue = (hoursDiff <= 0 || daysDiff <= 0);
       var isWarning = !isDue && (hoursDiff <= 1500 || daysDiff <= 15);
       var statusText = isDue
@@ -715,8 +720,8 @@ var ReportsModule = (function () {
 
     filteredVehs.forEach(function (v) {
       var vLogs = filteredLogs.filter(function (l) { return l.vehicleId === v.id; });
-      var totalKm = vLogs.reduce(function (a, l) { return a + (l.workedHours || 0); }, 0);
-      var avgKm = vLogs.length > 0 ? Math.round(totalKm / vLogs.length) : 0;
+      var totalHrs = vLogs.reduce(function (a, l) { return a + (l.workedHours || 0); }, 0);
+      var avgHrs = vLogs.length > 0 ? Math.round(totalHrs / vLogs.length) : 0;
       var lastLog = allLogs.filter(function (l) { return l.vehicleId === v.id; }).sort(function (a, b) { return b.date < a.date ? -1 : 1; })[0];
       var hasToday = allLogs.some(function (l) { return l.vehicleId === v.id && l.date === today; });
       var todayBadge = hasToday
@@ -726,9 +731,9 @@ var ReportsModule = (function () {
       html += '<tr>' +
         '<td><strong style="color:var(--accent-cyan);">' + Utils.escapeHtml(v.plate) + '</strong>' +
         '<div class="text-xs text-muted">' + Utils.escapeHtml(v.brand + ' ' + v.model) + '</div></td>' +
-        '<td style="font-weight:800;color:var(--accent-primary);">+' + Utils.fmtNum(totalKm) + ' hrs</td>' +
+        '<td style="font-weight:800;color:var(--accent-primary);">+' + Utils.fmtNum(totalHrs) + ' hrs</td>' +
         '<td>' + vLogs.length + ' día(s)</td>' +
-        '<td>' + Utils.fmtNum(avgKm) + ' hrs/día</td>' +
+        '<td>' + Utils.fmtNum(avgHrs) + ' hrs/día</td>' +
         '<td style="font-weight:600;">' + Utils.fmtNum(v.hours || 0) + ' hrs</td>' +
         '<td class="text-sm">' + (lastLog ? Utils.formatDate(lastLog.date) + '<br><span class="text-xs text-muted">' + Utils.fmtNum(lastLog.totalHours || 0) + ' h total</span>' : '—') + '</td>' +
         '<td>' + todayBadge + '</td></tr>';
@@ -1017,8 +1022,13 @@ var ReportsModule = (function () {
       var v = vMap[r.vehicleId];
       if (!v) return null;
       var hoursDiff = (r.lastPerformedHours + r.frequencyHours) - (v.hours || 0);
-      var nextDate = new Date(new Date(r.lastPerformedDate).getTime() + r.frequencyDays * 864e5).toISOString().split('T')[0];
-      var daysDiff = Math.floor((new Date(nextDate) - new Date()) / 864e5);
+      var baseDate = new Date(r.lastPerformedDate + 'T00:00:00');
+      baseDate.setDate(baseDate.getDate() + (r.frequencyDays || 0));
+      var nextDate = Utils.toLocalISO(baseDate);
+      
+      var nextDateObj = new Date(nextDate + 'T00:00:00');
+      var todayObj = new Date(); todayObj.setHours(0,0,0,0);
+      var daysDiff = Math.ceil((nextDateObj - todayObj) / 864e5);
       var isDue = (hoursDiff <= 0 || daysDiff <= 0);
       var isWarn = !isDue && (hoursDiff <= 1500 || daysDiff <= 15);
       var estado = isDue ? 'VENCIDO' : (isWarn ? 'PRÓXIMO' : 'AL DÍA');

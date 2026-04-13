@@ -158,8 +158,10 @@ var WorkshopModule = (function () {
     var matDel = (wo.materials || []).filter(function (m) { return m.delivered; }).length;
     var progress = matTotal > 0 ? Math.round((matDel / matTotal) * 100) : 0;
 
-    var daysOpen = Math.floor((new Date() - new Date(wo.date)) / 864e5);
-    var timeLabel = daysOpen === 0 ? 'Hoy' : 'Hace ' + daysOpen + ' d';
+    var todayObj = new Date(); todayObj.setHours(0,0,0,0);
+    var woDateObj = new Date(wo.date + 'T00:00:00');
+    var daysOpen = Math.floor((todayObj - woDateObj) / 864e5);
+    var timeLabel = daysOpen <= 0 ? 'Hoy' : 'Hace ' + daysOpen + ' d';
     var priorityColor = wo.priority === 'alta' ? '#ef4444' : (wo.priority === 'media' ? '#f59e0b' : '#10b981');
 
     // Badge especial para OTs preventivas (solo si tienen rutina asignada)
@@ -225,11 +227,11 @@ var WorkshopModule = (function () {
     var settings = DB.getSettings();
 
     if (action === 'deliver') {
-      var qty = parseInt(document.getElementById('mat-del-' + idx).value) || 0;
+      var qty = Utils.safeNum(document.getElementById('mat-del-' + idx).value);
       if (qty <= 0) return;
-      if (!item || item.stock < qty) { Utils.toast('Stock insuficiente. Disponible: ' + (item ? item.stock : 0), 'error'); return; }
+      if (!item || Utils.safeNum(item.stock) < qty) { Utils.toast('Stock insuficiente. Disponible: ' + (item ? item.stock : 0), 'error'); return; }
 
-      var unitC = item.unitCost || 0;
+      var unitC = Utils.safeNum(item.unitCost);
       var baseAdd = Utils.dec.mul(qty, unitC);
 
       DB.transaction(function () {
@@ -240,21 +242,21 @@ var WorkshopModule = (function () {
           notes: 'Entrega taller ' + o.number + ' (Costo: ' + Utils.fmtNum(baseAdd) + ')'
         });
 
-        m.qtyDelivered = (m.qtyDelivered || 0) + qty;
-        m.delivered = (m.qtyDelivered >= m.qtyRequested);
+        m.qtyDelivered = Utils.dec.add(Utils.safeNum(m.qtyDelivered), qty);
+        m.delivered = (Utils.safeNum(m.qtyDelivered) >= Utils.safeNum(m.qtyRequested));
         m.unitCost = unitC;
-        m.totalBase = Utils.dec.add(m.totalBase || 0, baseAdd);
+        m.totalBase = Utils.dec.add(Utils.safeNum(m.totalBase), baseAdd);
         m.totalCost = m.totalBase;
         DB.update('workOrders', wId, { materials: o.materials });
       });
       Utils.toast('Entrega registrada exitosamente.', 'success');
 
     } else if (action === 'return') {
-      var rQty = parseInt(document.getElementById('mat-ret-' + idx).value) || 0;
-      if (rQty <= 0 || rQty > (m.qtyDelivered || 0)) return;
+      var rQty = Utils.safeNum(document.getElementById('mat-ret-' + idx).value);
+      if (rQty <= 0 || rQty > Utils.safeNum(m.qtyDelivered)) return;
 
       Utils.confirm('¿Deseas devolver ' + rQty + ' unidad(es) al inventario?', 'Confirmar Devolución', function () {
-        var unitC = m.unitCost || (item ? item.unitCost : 0) || 0;
+        var unitC = Utils.safeNum(m.unitCost || (item ? item.unitCost : 0));
         var baseSub = Utils.dec.mul(rQty, unitC);
 
         DB.transaction(function () {
@@ -267,9 +269,9 @@ var WorkshopModule = (function () {
             });
           }
 
-          m.qtyDelivered = (m.qtyDelivered || 0) - rQty;
-          m.delivered = (m.qtyDelivered >= m.qtyRequested);
-          m.totalBase = Math.max(0, Utils.dec.sub(m.totalBase || 0, baseSub));
+          m.qtyDelivered = Utils.dec.sub(Utils.safeNum(m.qtyDelivered), rQty);
+          m.delivered = (Utils.safeNum(m.qtyDelivered) >= Utils.safeNum(m.qtyRequested));
+          m.totalBase = Math.max(0, Utils.dec.sub(Utils.safeNum(m.totalBase), baseSub));
           m.totalCost = m.totalBase;
           DB.update('workOrders', wId, { materials: o.materials });
         });
@@ -353,9 +355,9 @@ var WorkshopModule = (function () {
         '<div class="flex gap-2" style="margin-top:4px;align-items:center;">' +
         '<select class="form-select" id="dlv-extra-item" style="flex:1;">' +
         '<option value="">Buscar repuesto...</option>' +
-        DB.getAll('items').map(function (i) { return '<option value="' + i.id + '">' + Utils.escapeHtml(i.code + ' — ' + i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
+        DB.getAll('items').filter(function(i){ return i.active !== false; }).map(function (i) { return '<option value="' + i.id + '">' + Utils.escapeHtml(i.code + ' — ' + i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
         '</select>' +
-        '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +      
+        '<input type="number" id="dlv-extra-qty" class="form-input" min="1" value="1" style="width:80px;" placeholder="Cant.">' +
         '<button class="btn btn-cyan btn-sm" id="dlv-add-extra">➕ Añadir</button>' +
         '</div></div>' : '') +
       '<div id="dlv-mats">' + buildMatHtml() + '</div>' +
@@ -372,6 +374,19 @@ var WorkshopModule = (function () {
         '<button class="btn btn-primary btn-sm" id="dlv-btn-join">+ Unir a OT</button>' +
         '</div>' +
         '<div class="text-xs text-muted" style="margin-top:4px;">Esto registrará su participación sin necesidad de pedir un repuesto.</div>' +
+        '</div>' : '') +
+      // ── CHECKLIST PREVENTIVO ──
+      (wo.checklist && wo.checklist.length > 0 ?
+        '<div class="form-group" style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;">' +
+        '<label>📋 Checklist de Tareas Preventivas</label>' +
+        '<div style="margin-top:8px;">' +
+        wo.checklist.map(function (c, i) {
+          return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed var(--border);">' +
+            '<input type="checkbox" id="chk-' + i + '" ' + (c.completed ? 'checked' : '') + ' ' + (isCompleted ? 'disabled' : '') + ' onchange="WorkshopModule._toggleCheckItem(\'' + woId + '\',' + i + ')" style="width:18px;height:18px;cursor:pointer;">' +
+            '<label for="chk-' + i + '" style="cursor:pointer;font-size:0.9rem;' + (c.completed ? 'text-decoration:line-through;color:var(--text-muted);' : '') + '">' + Utils.escapeHtml(c.task) + '</label>' +
+            '</div>';
+        }).join('') +
+        '</div>' +
         '</div>' : '') +
       '<div class="form-group"><label>Observaciones del técnico</label><textarea class="form-textarea" id="dlv-notes" rows="3" ' + (isCompleted ? 'disabled' : '') + '>' + Utils.escapeHtml(wo.notes || '') + '</textarea></div>' +
       '</div>' +
@@ -457,18 +472,10 @@ var WorkshopModule = (function () {
           var emp = DB.getById('employees', empId);
           if (!emp) return;
 
-          // ── Anti-duplicado: verificar si ya fue registrado en el activityLog ──
+          // ── Registro proactivo de participación ──
           var woFresh = DB.getById('workOrders', woId);
-          var yaRegistrado = (woFresh.activityLog || []).some(function (log) {
-            return log.userId === empId;
-          });
-          if (yaRegistrado) {
-            Utils.toast('⚠️ ' + emp.name + ' ya está registrado en el equipo de esta OT.', 'warning');
-            sel.value = '';
-            return;
-          }
-
-          // Registrar log de participación proactiva con ID del empleado como userId
+          
+          // Registrar log de participación con ID del empleado como userId
           WorkOrdersModule.addWOLog(
             woId,
             emp.name + ' se unió al equipo de trabajo.',
@@ -487,6 +494,14 @@ var WorkshopModule = (function () {
         var currentWo = DB.getById('workOrders', woId);
         if (!currentWo) return;
 
+        // ── VALIDACIÓN CHECKLIST (NUEVO) ──
+        if (currentWo.checklist && currentWo.checklist.length > 0) {
+          var incomplete = currentWo.checklist.some(function (c) { return !c.completed; });
+          if (incomplete) {
+            if (!window.confirm('⚠️ ATENCIÓN: El checklist de tareas preventivas NO se ha completado. ¿Deseas finalizar la OT de todos modos?')) return;
+          }
+        }
+
         if (!currentWo.assignedTo) {
           Utils.toast('⚠️ Operación bloqueada: La OT debe tener un técnico asignado para ser finalizada.', 'warning');
           return;
@@ -503,7 +518,9 @@ var WorkshopModule = (function () {
             notes: notes,
             laborCost: finData.labor,
             externalCost: finData.external,
-            laborHours: (finData.laborEntries || []).reduce(function (acc, e) { return acc + (e.hours || 0); }, 0),
+            laborHours: (finData.laborEntries || []).reduce(function (acc, e) { 
+              return Utils.dec.add(acc, Utils.safeNum(e.hours || 0)); 
+            }, 0),
             materialBase: finData.matBase,
             totalCost: finData.total,
             laborEntries: finData.laborEntries || []  // Array multi-mecánico
@@ -538,7 +555,7 @@ var WorkshopModule = (function () {
     var matBaseSum = (wo.materials || []).reduce(function (acc, m) { return Utils.dec.add(acc, m.totalBase || 0); }, 0);
     var settings = DB.getSettings();
     var baseHours = settings.monthlyWorkingHours || 220;
-    
+
     // Poka-Yoke global reference
     var vehicleForHoro = DB.getById('vehicles', wo.vehicleId);
 
@@ -555,11 +572,17 @@ var WorkshopModule = (function () {
     // 2. Agregar mecánicos detectados en el activityLog
     var allEmps = DB.getAll('employees');
     (wo.activityLog || []).forEach(function (log) {
-      if (log.userId && !mechMap[log.userId]) {
-        var logEmp = allEmps.find(function (e) { return e.id === log.userId; });
-        if (logEmp && logEmp.isTechnician) {
-          var logRate = (logEmp.monthlySalary || 0) / baseHours;
-          mechMap[logEmp.id] = { id: logEmp.id, name: logEmp.name, rate: logRate, hours: 0 };
+      if (log.userId) {
+        if (!mechMap[log.userId]) {
+          var logEmp = allEmps.find(function (e) { return e.id === log.userId; });
+          if (logEmp && logEmp.isTechnician) {
+            var logRate = (logEmp.monthlySalary || 0) / baseHours;
+            mechMap[logEmp.id] = { id: logEmp.id, name: logEmp.name, rate: logRate, hours: 0 };
+          }
+        }
+        // [AUDITORÍA]: Acumular horas si el log ya las tiene (Blueprint V1.1)
+        if (mechMap[log.userId]) {
+          mechMap[log.userId].hours = Utils.dec.add(mechMap[log.userId].hours, Utils.safeNum(log.laborHours));
         }
       }
     });
@@ -584,8 +607,8 @@ var WorkshopModule = (function () {
         return '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:8px;background:var(--bg-elevated);border-radius:8px;margin-bottom:6px;" id="mech-row-' + i + '">' +
           '<div><div style="font-weight:600;font-size:0.875rem;">' + Utils.escapeHtml(m.name) + '</div>' +
           '<div class="text-xs text-muted">' + rateStr + '</div></div>' +
-          '<div><input type="number" id="mech-hours-' + i + '" min="0" step="0.5" value="0" class="form-input" style="width:80px;" placeholder="Hrs" oninput="WorkshopModule._updateMechCost(' + i + ',' + m.rate + ')"></div>' +
-          '<div id="mech-cost-' + i + '" style="font-weight:700;color:var(--color-success);min-width:80px;text-align:right;">$ 0</div>' +
+          '<div><input type="number" id="mech-hours-' + i + '" min="0" step="0.5" value="' + m.hours + '" class="form-input" style="width:80px;" placeholder="Hrs" oninput="WorkshopModule._updateMechCost(' + i + ',' + m.rate + ')"></div>' +
+          '<div id="mech-cost-' + i + '" style="font-weight:700;color:var(--color-success);min-width:80px;text-align:right;">$ ' + Utils.fmtNum(Math.round(m.hours * m.rate)) + '</div>' +
           '<button onclick="WorkshopModule._removeMechRow(' + i + ')" style="background:none;border:none;color:var(--color-danger);cursor:pointer;font-size:1rem;">✕</button>' +
           '</div>';
       }).join('');
@@ -709,14 +732,9 @@ var WorkshopModule = (function () {
 
       if (ext < 0) { Utils.toast('Los costos no pueden ser negativos.', 'error'); return; }
 
-      // Leer horómetro actual del usuario (ya que el automático puede no haberse actualizado)
-      var hrInputEl = document.getElementById('fin-hr-final');
-      var horoFinal = hrInputEl ? parseFloat(hrInputEl.value) || 0 : (vehicleForHoro ? vehicleForHoro.hours || 0 : 0);
-      
-      // Actualizar el vehículo globalmente para evitar desajustes futuros
-      if (vehicleForHoro && horoFinal > (vehicleForHoro.hours || 0)) {
-        DB.update('vehicles', wo.vehicleId, { hours: horoFinal });
-      }
+      // ── PASO B: LECTURA PASIVA (Fuente Única de la Verdad) ──
+      // El taller ya no dicta el horómetro, lo consume del reporte operativo.
+      var horoFinal = vehicleForHoro ? (vehicleForHoro.hours || 0) : 0;
 
       // Recolectar entradas de labor
       var laborEntries = [];
@@ -755,6 +773,21 @@ var WorkshopModule = (function () {
     render: render,
     acceptOT: acceptOT,
     openDeliverModal: openDeliverModal,
+    _toggleCheckItem: function (woId, idx) {
+      var wo = DB.getById('workOrders', woId);
+      if (!wo || !wo.checklist || !wo.checklist[idx]) return;
+      wo.checklist[idx].completed = !wo.checklist[idx].completed;
+      DB.update('workOrders', woId, { checklist: wo.checklist });
+      // El re-render automático de la UI por el listener de DB debería bastar, 
+      // pero refrescamos el modal para feedback instantáneo (CSS de tachado)
+      var dlv = document.getElementById('deliver-modal');
+      if (dlv) {
+        // En lugar de cerrar y abrir, podemos inyectar de nuevo solo el modal-body o similar
+        // Pero para no romper manejadores de eventos, re-llamamos la apertura:
+        dlv.remove();
+        openDeliverModal(woId);
+      }
+    },
     _doAction: _doAction,
     resetFilters: resetFilters,
     _updateMechCost: function (i, rate) { if (WorkshopModule._updateMechCost) WorkshopModule._updateMechCost(i, rate); },

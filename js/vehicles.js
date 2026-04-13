@@ -175,41 +175,49 @@ var VehiclesModule = (function () {
     var allDocs = DB.getAll('vehicleDocuments');
     var today = Utils.todayISO();
 
-    // ── Alertas de Mantenimiento Preventivo ─────────────────
+    // ── Alertas de Mantenimiento Preventivo (Blindadas V2.1) ─
     var alerts = [];
     routines.forEach(function (r) {
-      var v = allVehicles.find(function (x) { return x.id === r.vehicleId; });
-      if (!v || !v.active) return;
+      try {
+        var v = allVehicles.find(function (x) { return x.id === r.vehicleId; });
+        if (!v || !v.active) return; // 🛡️ Nivel 3: Defensive Coding
 
-      var isDue = false;
-      var isWarning = false;
-      var statusMsg = '';
+        var isDue = false;
+        var isWarning = false;
+        var statusMsg = '';
 
-      var hoursDiff = (r.lastPerformedHours + r.frequencyHours) - (v.hours || 0);
+        // 🧠 Nivel 2: MOTOR DECIMAL + Sanitización
+        var lhr = Utils.safeNum(r.lastPerformedHours);
+        var fhr = Utils.safeNum(r.frequencyHours);
+        var vhr = Utils.safeNum(v.hours);
+        var hoursDiff = Utils.dec.sub(Utils.dec.add(lhr, fhr), vhr);
 
-      if (hoursDiff <= 0) { isDue = true; statusMsg = 'Vencido por horas (' + Math.abs(hoursDiff) + ' hrs)'; }
-      else if (hoursDiff <= 100) { isWarning = true; statusMsg = 'Próximo (' + hoursDiff + ' hrs faltantes)'; }
+        if (hoursDiff <= 0) { isDue = true; statusMsg = 'Vencido por horas (' + Math.abs(hoursDiff) + ' hrs)'; }
+        else if (hoursDiff <= 100) { isWarning = true; statusMsg = 'Próximo (' + hoursDiff + ' hrs faltantes)'; }
 
-      var nextDate = new Date(r.lastPerformedDate + 'T00:00:00'); 
-      nextDate.setDate(nextDate.getDate() + (r.frequencyDays || 0));
-      
-      var today = new Date();
-      today.setHours(0,0,0,0);
-      
-      var daysDiff = Math.floor((nextDate - today) / (1000 * 60 * 60 * 24));
+        if (r.lastPerformedDate) {
+          var nextDate = new Date(r.lastPerformedDate + 'T00:00:00');
+          nextDate.setDate(nextDate.getDate() + (Utils.safeNum(r.frequencyDays) || 0));
+          var todayObj = new Date(); todayObj.setHours(0, 0, 0, 0);
+          var daysDiff = Math.ceil((nextDate - todayObj) / 864e5);
 
-      if (!isDue) {
-        if (daysDiff <= 0) { isDue = true; statusMsg = 'Vencido por fecha (Hace ' + Math.abs(daysDiff) + ' días)'; }
-        else if (daysDiff <= 15) {
-          if (!isWarning || daysDiff < Math.round(hoursDiff / 8)) {
-            isWarning = true; statusMsg = 'Próximo por fecha (En ' + daysDiff + ' días)';
+          if (!isDue) {
+            if (daysDiff <= 0) { isDue = true; statusMsg = 'Vencido por fecha (Hace ' + Math.abs(daysDiff) + ' días)'; }
+            else if (daysDiff <= 15) {
+              if (!isWarning || daysDiff < Math.round(hoursDiff / 8)) {
+                isWarning = true; statusMsg = 'Próximo por fecha (En ' + daysDiff + ' días)';
+              }
+            }
           }
         }
+
+        if (!isDue && !isWarning) {
+          statusMsg = 'Al día (Próx. a los ' + Utils.dec.add(lhr, fhr) + ' hrs)';
+        }
+        alerts.push({ routine: r, vehicle: v, isDue: isDue, isWarning: isWarning, msg: statusMsg, hoursDiff: hoursDiff, daysDiff: daysDiff });
+      } catch (e) {
+        console.warn('⚠️ Rutina corrupta ignorada (Safe Mode):', r.id, e);
       }
-      if (!isDue && !isWarning) {
-        statusMsg = 'Al día (Próx. a los ' + (r.lastPerformedHours + r.frequencyHours) + ' hrs)';
-      }
-      alerts.push({ routine: r, vehicle: v, isDue: isDue, isWarning: isWarning, msg: statusMsg, hoursDiff: hoursDiff, daysDiff: daysDiff });
     });
 
     alerts.sort(function (a, b) {
@@ -225,7 +233,10 @@ var VehiclesModule = (function () {
     allVehicles.filter(function (v) { return v.active; }).forEach(function (v) {
       var vDocs = allDocs.filter(function (d) { return d.vehicleId === v.id; });
       vDocs.forEach(function (d) {
-        var daysLeft = Math.floor((new Date(d.expiry) - new Date(today)) / 864e5);
+        var expiryDate = new Date(d.expiry + 'T00:00:00');
+        var todayObj = new Date();
+        todayObj.setHours(0,0,0,0);
+        var daysLeft = Math.round((expiryDate - todayObj) / 864e5);
         if (daysLeft <= 30) {
           docAlerts.push({ vehicle: v, doc: d, daysLeft: daysLeft });
         }
@@ -430,7 +441,10 @@ var VehiclesModule = (function () {
     var today = Utils.todayISO();
     var worst = { isExpired: false, isWarning: false, docName: '', daysLeft: 999 };
     docs.forEach(function (d) {
-      var daysLeft = Math.floor((new Date(d.expiry) - new Date(today)) / 864e5);
+      var expiryDate = new Date(d.expiry + 'T00:00:00');
+      var todayObj = new Date();
+      todayObj.setHours(0,0,0,0);
+      var daysLeft = Math.round((expiryDate - todayObj) / 864e5);
       var name = DOC_TYPE_NAMES[d.type] || d.type;
       if (daysLeft < 0 && (!worst.isExpired || daysLeft < worst.daysLeft)) {
         worst = { isExpired: true, isWarning: false, docName: name, daysLeft: daysLeft };
@@ -447,10 +461,13 @@ var VehiclesModule = (function () {
     var best = null;
     routines.forEach(function (r) {
       var hoursDiff = (r.lastPerformedHours + r.frequencyHours) - (v.hours || 0);
-      var nextDate = new Date(new Date(r.lastPerformedDate).getTime() + r.frequencyDays * 864e5).toISOString().split('T')[0];
-      var daysDiff = Math.floor((new Date(nextDate) - new Date()) / 864e5);
+      var nextDate = new Date(r.lastPerformedDate + 'T00:00:00');
+      nextDate.setDate(nextDate.getDate() + (r.frequencyDays || 0));
+      var todayObj = new Date();
+      todayObj.setHours(0, 0, 0, 0);
+      var daysDiff = Math.round((nextDate - todayObj) / 864e5);
       var isDue = (hoursDiff <= 0 || daysDiff <= 0);
-      var isWarn = !isDue && (hoursDiff <= 100 || daysDiff <= 15);
+      var isWarn = !isDue && (hoursDiff <= 150 || daysDiff <= 15);
       var severity = isDue ? 0 : (isWarn ? 1 : 2);
       var msg = isDue
         ? (hoursDiff <= 0 ? 'Vencido (' + Math.abs(hoursDiff) + ' hrs)' : 'Venció hace ' + Math.abs(daysDiff) + ' días')
@@ -620,6 +637,7 @@ var VehiclesModule = (function () {
       '</div>' +
       '</div>' +
       '<div class="flex gap-2">' +
+      '<button class="btn btn-secondary btn-sm" onclick="Utils.printVehicleHistory(\'' + id + '\')">🖨️ Hoja de Vida</button>' +
       '<button class="btn btn-secondary btn-sm" onclick="VehiclesModule.exportVehicleExcel(\'' + id + '\')">📤 Exportar</button>' +
       '<button class="modal-close" id="hist-close">✕</button>' +
       '</div>' +
@@ -742,7 +760,10 @@ var VehiclesModule = (function () {
         '<th>Tipo de Documento</th><th>Vencimiento</th><th>Días restantes</th><th>Estado</th><th>Notas</th><th></th>' +
         '</tr></thead><tbody>';
       docs.slice().sort(function (a, b) { return a.expiry < b.expiry ? -1 : 1; }).forEach(function (d) {
-        var daysLeft = Math.floor((new Date(d.expiry) - new Date(today)) / 864e5);
+        var expiryDate = new Date(d.expiry + 'T00:00:00');
+        var todayObj = new Date();
+        todayObj.setHours(0,0,0,0);
+        var daysLeft = Math.round((expiryDate - todayObj) / 864e5);
         var badge, rowStyle;
         if (daysLeft < 0) {
           badge = '<span class="badge badge-red">🔴 Vencido</span>';
@@ -1126,15 +1147,42 @@ var VehiclesModule = (function () {
     var r = routineId ? DB.getById('preventiveRoutines', routineId) : null;
     var old = document.getElementById('rt-modal'); if (old) old.remove();
 
-    var html = '<div class="modal-overlay" id="rt-modal" style="z-index:3000;"><div class="modal">' +
+    var currentTasks = r && r.tasks ? r.tasks.slice() : [];
+
+    function buildTasksHtml() {
+      if (!currentTasks.length) return '<p class="text-xs text-muted" style="text-align:center;padding:12px;border:1px dashed var(--border);border-radius:8px;">No hay tareas definidas para esta rutina.</p>';
+      return currentTasks.map(function (t, i) {
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg-elevated);border-radius:8px;margin-bottom:6px;font-size:0.875rem;">' +
+          '<span>' + Utils.escapeHtml(t) + '</span>' +
+          '<button class="btn btn-ghost btn-sm" onclick="VehiclesModule._rmRtTask(' + i + ')" style="color:var(--color-danger);">✕</button>' +
+          '</div>';
+      }).join('');
+    }
+
+    VehiclesModule._rmRtTask = function (idx) {
+      currentTasks.splice(idx, 1);
+      document.getElementById('rt-tasks-container').innerHTML = buildTasksHtml();
+    };
+
+    var html = '<div class="modal-overlay" id="rt-modal" style="z-index:3000;"><div class="modal" style="max-width:500px;">' +
       '<div class="modal-header"><h3>' + (r ? '✏️ Editar Rutina' : '📅 Nueva Rutina') + ' para ' + Utils.escapeHtml(v.plate) + '</h3><button class="modal-close" id="rt-close">✕</button></div>' +
       '<div class="modal-body"><div class="form-grid">' +
       '<div class="form-group span-2"><label>Nombre de la Rutina *</label><input class="form-input" id="rt-name" value="' + Utils.escapeHtml(r ? r.name : '') + '" placeholder="Ej: Cambio de Aceite y Filtros"></div>' +
-      '<div class="form-group"><label>Frecuencia (Hrs) *</label><input class="form-input" type="number" id="rt-fkm" value="' + (r ? r.frequencyHours : 10000) + '" min="1"></div>' +
+      '<div class="form-group"><label>Frecuencia (Hrs) *</label><input class="form-input" type="number" id="rt-fhr" value="' + (r ? r.frequencyHours : 10000) + '" min="1"></div>' +
       '<div class="form-group"><label>Frecuencia Máx (Días) *</label><input class="form-input" type="number" id="rt-fdays" value="' + (r ? r.frequencyDays : 180) + '" min="1"></div>' +
-      '<div class="form-group"><label>Último Mtto. (Hrs) *</label><input class="form-input" type="number" id="rt-lkm" value="' + (r ? r.lastPerformedHours : v.hours || 0) + '" min="0"></div>' +
+      '<div class="form-group"><label>Último Mtto. (Hrs) *</label><input class="form-input" type="number" id="rt-lhr" value="' + (r ? r.lastPerformedHours : v.hours || 0) + '" min="0"></div>' +
       '<div class="form-group"><label>Último Mtto. (Fecha) *</label><input class="form-input" type="date" id="rt-ldate" value="' + (r ? r.lastPerformedDate : Utils.todayISO()) + '"></div>' +
-      '</div></div>' +
+      '</div>' +
+      '<div class="divider"></div>' +
+      '<div class="form-group">' +
+      '<label>📝 Lista de Tareas (Checklist)</label>' +
+      '<div class="flex gap-2" style="margin-top:6px;margin-bottom:12px;">' +
+      '<input type="text" id="rt-task-input" class="form-input" placeholder="Ej: Revisar presión de neumáticos" style="flex:1;">' +
+      '<button class="btn btn-cyan btn-sm" id="rt-add-task-btn">➕</button>' +
+      '</div>' +
+      '<div id="rt-tasks-container" style="max-height:200px;overflow-y:auto;padding-right:4px;">' + buildTasksHtml() + '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="modal-footer"><button class="btn btn-secondary" id="rt-can">Cancelar</button><button class="btn btn-primary" id="rt-sv">💾 Guardar</button></div>' +
       '</div></div>';
 
@@ -1145,21 +1193,36 @@ var VehiclesModule = (function () {
     document.getElementById('rt-can').onclick = close;
     ov.onclick = function (e) { if (e.target === ov) close(); };
 
+    document.getElementById('rt-add-task-btn').onclick = function () {
+      var inp = document.getElementById('rt-task-input');
+      var t = inp.value.trim();
+      if (!t) return;
+      currentTasks.push(t);
+      inp.value = '';
+      document.getElementById('rt-tasks-container').innerHTML = buildTasksHtml();
+      inp.focus();
+    };
+
+    document.getElementById('rt-task-input').onkeypress = function (e) {
+      if (e.key === 'Enter') document.getElementById('rt-add-task-btn').click();
+    };
+
     document.getElementById('rt-sv').onclick = function () {
       var name = document.getElementById('rt-name').value.trim();
-      var fhr = parseFloat(document.getElementById('rt-fkm').value);
+      var fhr = parseFloat(document.getElementById('rt-fhr').value);
       var fdays = parseInt(document.getElementById('rt-fdays').value);
-      var lhr = parseFloat(document.getElementById('rt-lkm').value);
+      var lhr = parseFloat(document.getElementById('rt-lhr').value);
       var ldate = document.getElementById('rt-ldate').value;
 
-      if (!name || !fhr || !fdays || isNaN(lkm) || !ldate) {
-        Utils.toast('Todos los campos son obligatorios y numéricos.', 'warning'); return;
+      if (!name || isNaN(fhr) || isNaN(fdays) || isNaN(lhr) || !ldate) {
+        Utils.toast('Todos los campos son obligatorios y deben ser numéricos.', 'warning'); return;
       }
 
       var data = {
         vehicleId: vehicleId,
-        name: name, frequencyHours: fkm, frequencyDays: fdays,
-        lastPerformedHours: lkm, lastPerformedDate: ldate, active: true
+        name: name, frequencyHours: fhr, frequencyDays: fdays,
+        lastPerformedHours: lhr, lastPerformedDate: ldate, active: true,
+        tasks: currentTasks
       };
 
       if (r) {
@@ -1177,7 +1240,29 @@ var VehiclesModule = (function () {
 
   function deleteRoutine(routineId, vehicleId) {
     var r = DB.getById('preventiveRoutines', routineId);
-    Utils.confirm('¿Eliminar la rutina "' + r.name + '"?', 'Eliminar Rutina', function () {
+    if (!r) return;
+
+    // 🛡️ ESCUDO DE BORRADO (V2.1): Verificar integridad referencial
+    var hasHistory = DB.getAll('workOrders').some(function (w) {
+      return (w.routineId === routineId) || (w.routineName && w.routineName === r.name && w.vehicleId === r.vehicleId);
+    });
+
+    if (hasHistory) {
+      Utils.confirm(
+        "❌ Acción Bloqueada: La rutina '" + r.name + "' tiene historial vinculado en Órdenes de Trabajo.\n\n¿Deseas INACTIVARLA en su lugar? (Esto dejará de generar alertas sin perder la validez de los reportes pasados).",
+        "Protección de Historial",
+        function () {
+          DB.update('preventiveRoutines', routineId, { active: false });
+          Utils.toast('Rutina inactivada exitosamente.', 'info');
+          renderVehicleRoutines(vehicleId);
+          render();
+        },
+        true
+      );
+      return;
+    }
+
+    Utils.confirm('¿Eliminar definitivamente la rutina "' + r.name + '"? Esta acción no se puede deshacer.', 'Eliminar Rutina', function () {
       DB.remove('preventiveRoutines', routineId);
       Utils.toast('Rutina eliminada.', 'success');
       renderVehicleRoutines(vehicleId);
@@ -1222,7 +1307,7 @@ var VehiclesModule = (function () {
       '<div class="form-group span-2"><label>Repuestos del Inventario (Opcional)</label>' +
       '<div class="flex gap-2">' +
       '<select class="form-select" id="qf-mat-sel" style="flex:1;"><option value="">Seleccionar...</option>' +
-      items.map(function (i) { return '<option value="' + i.id + '" data-name="' + Utils.escapeHtml(i.name) + '" data-unit="' + Utils.escapeHtml(i.unit) + '">' + Utils.escapeHtml(i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
+      DB.getAll('items').filter(function(i){ return i.active !== false; }).map(function (i) { return '<option value="' + i.id + '" data-name="' + Utils.escapeHtml(i.name) + '" data-unit="' + Utils.escapeHtml(i.unit) + '">' + Utils.escapeHtml(i.name) + ' (Stock: ' + i.stock + ')</option>'; }).join('') +
       '</select>' +
       '<input type="number" id="qf-mat-qty" value="1" min="1" class="form-input" style="width:60px;">' +
       '<button class="btn btn-secondary btn-sm" id="qf-mat-add">➕</button>' +
@@ -1286,13 +1371,18 @@ var VehiclesModule = (function () {
         // Process materials
         selectedMats.forEach(function (m) {
           var item = DB.getById('items', m.id);
-          var cost = (item.unitCost || 0) * m.qty;
-          matCost += cost;
-          DB.update('items', m.id, { stock: item.stock - m.qty });
+          var currentStock = Utils.safeNum(item.stock);
+          var qtyToUse = Utils.safeNum(m.qty);
+          var cost = Utils.dec.mul(Utils.safeNum(item.unitCost), qtyToUse);
+          matCost = Utils.dec.add(matCost, cost);
+
+          // 🧠 MOTOR DECIMAL V1.3: Resta exacta
+          DB.update('items', m.id, { stock: Utils.dec.sub(currentStock, qtyToUse) });
+          
           var activeUser = DB.getById('users', settings.activeUserId);
           var mov = {
-            itemId: m.id, itemName: item.name, type: 'salida', qty: m.qty,
-            unitCost: item.unitCost, totalCost: cost, date: date,
+            itemId: m.id, itemName: item.name, type: 'salida', qty: qtyToUse,
+            unitCost: Utils.safeNum(item.unitCost), totalCost: cost, date: date,
             reference: 'MTTO-' + v.plate, notes: 'Mantenimiento: ' + r.name,
             userId: settings.activeUserId, userName: activeUser ? activeUser.name : 'Sistema',
             maintenanceLogId: logId
@@ -1377,15 +1467,19 @@ var VehiclesModule = (function () {
   var DOWNTIME_STATUSES = ['en_proceso', 'esperando_repuestos'];
 
   function isVehicleInMaintenance(vehicleId) {
-    var wos = DB.getAll('workOrders');
+    var wos = DB.getAll('workOrders') || [];
     var openOTs = wos.filter(function (w) {
       return w.vehicleId === vehicleId && DOWNTIME_STATUSES.indexOf(w.status) !== -1;
     });
     if (!openOTs.length) return { inMaintenance: false, openOTs: [], sinceDate: null, downtimeDays: 0 };
     // Earliest open OT date
-    openOTs.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    openOTs.sort(function (a, b) { return (a.date || '') < (b.date || '') ? -1 : 1; });
     var sinceDate = openOTs[0].date;
-    var downtimeDays = Math.max(0, Math.floor((new Date() - new Date(sinceDate + 'T00:00:00')) / 864e5));
+    if (!sinceDate) return { inMaintenance: true, openOTs: openOTs, sinceDate: null, downtimeDays: 0 };
+    
+    var todayObj = new Date(); todayObj.setHours(0,0,0,0);
+    var sinceObj = new Date(sinceDate + 'T00:00:00');
+    var downtimeDays = isNaN(sinceObj.getTime()) ? 0 : Math.max(0, Math.floor((todayObj - sinceObj) / 864e5));
     return { inMaintenance: true, openOTs: openOTs, sinceDate: sinceDate, downtimeDays: downtimeDays };
   }
 
@@ -1849,8 +1943,8 @@ var VehiclesModule = (function () {
       for (var w = 7; w >= 0; w--) {
         var wEnd = new Date(); wEnd.setDate(wEnd.getDate() - w * 7);
         var wStart = new Date(wEnd); wStart.setDate(wStart.getDate() - 6);
-        var wEndStr = wEnd.toISOString().split('T')[0];
-        var wStartStr = wStart.toISOString().split('T')[0];
+        var wEndStr = Utils.toLocalISO(wEnd);
+        var wStartStr = Utils.toLocalISO(wStart);
         var wCost = logs.filter(function (l) { return l.date >= wStartStr && l.date <= wEndStr; })
           .reduce(function (a, l) { return a + (l.cost || 0); }, 0);
         weeks.push(wCost);
@@ -2147,12 +2241,10 @@ var VehiclesModule = (function () {
         DB.create('hoursLogs', { vehicleId: vehicleId, date: date, workedHours: workedHours, totalHours: totalHours, notes: notes, createdAt: today });
       }
 
-      // Actualizar hr maestro del vehículo de manera segura (solo incrementar)
-      if (totalHours > (v.hours || 0)) {
-        DB.update('vehicles', vehicleId, { hours: totalHours });
-      }
+      // 🧠 Sincronización Maestra (V2.2)
+      syncVehicleOdometer(vehicleId);
 
-      Utils.toast('✅ ' + v.plate + ': +' + Utils.fmtNum(workedHours) + ' hrs hoy → Total: ' + Utils.fmtNum(totalHours) + ' hrs', 'success');
+      Utils.toast('✅ ' + v.plate + ': +' + Utils.fmtNum(workedHours) + ' hrs hoy.', 'success');
       close();
       render();
     };
@@ -2176,13 +2268,13 @@ var VehiclesModule = (function () {
   function syncVehicleOdometer(vehicleId) {
     var maxhr = 0;
     // 1. Logs diarios
-    DB.getAll('hoursLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.totalHours > maxKm) maxhr = l.totalHours; });
+    DB.getAll('hoursLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.totalHours > maxhr) maxhr = l.totalHours; });
     // 2. Combustible
-    DB.getAll('fuelLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
+    DB.getAll('fuelLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxhr) maxhr = l.hours; });
     // 3. Mantenimientos
-    DB.getAll('maintenanceLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
+    DB.getAll('maintenanceLogs').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxhr) maxhr = l.hours; });
     // 4. Inspecciones
-    DB.getAll('vehicleInspections').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxKm) maxhr = l.hours; });
+    DB.getAll('vehicleInspections').filter(function (l) { return l.vehicleId === vehicleId; }).forEach(function (l) { if (l.hours > maxhr) maxhr = l.hours; });
 
     var v = DB.getById('vehicles', vehicleId);
     if (v && maxhr > (v.hours || 0)) {

@@ -3,7 +3,7 @@
    ============================================================ */
 
 // ── CONFIGURATION (Reemplazar con tus credenciales reales) ──
-const firebaseConfig = {
+var firebaseConfig = {
     apiKey: "AIzaSyBVsrmyu5jokNkL6-D-ctgZlJM_Zp6FiMo",
     authDomain: "erp-logisticotci.firebaseapp.com",
     projectId: "erp-logisticotci",

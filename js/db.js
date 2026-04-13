@@ -27,9 +27,10 @@ var DB = (function () {
     categories: [], items: [], movements: [], workOrders: [],
     vehicles: [], preventiveRoutines: [], fuelLogs: [],
     vehicleDocuments: [], users: [], employees: [],
-    positions: [], settings: { nextOTNumber: 1, activeUserId: null }
+    positions: [], maintenanceLogs: [], hoursLogs: [],
+    settings: { nextOTNumber: 1, activeUserId: null }
   };
-  
+
   var _listeners = [];
   var _lastDocs = {}; // Punteros para paginación (V2.2)
   var _isCloudReady = false;
@@ -44,7 +45,7 @@ var DB = (function () {
       _data = seed();
       saveLocal();
     }
-    
+
     // Intentar conectar con la nube
     initCloud();
   }
@@ -97,7 +98,7 @@ var DB = (function () {
     var heavyCols = ['movements', 'workOrders'];
 
     // Escuchar Settings
-    window.firebase_db.collection('settings').doc('config').onSnapshot(function(doc) {
+    window.firebase_db.collection('settings').doc('config').onSnapshot(function (doc) {
       if (doc.exists) {
         _data.settings = Object.assign(_data.settings, doc.data());
         notify();
@@ -105,15 +106,15 @@ var DB = (function () {
     });
 
     // Carga Completa para Colecciones Ligeras
-    lightCols.forEach(function(col) {
-      window.firebase_db.collection(col).onSnapshot(function(snapshot) {
+    lightCols.forEach(function (col) {
+      window.firebase_db.collection(col).onSnapshot(function (snapshot) {
         if (snapshot.metadata.hasPendingWrites) return;
-        var remoteData = snapshot.docs.map(function(doc) { return Object.assign({ id: doc.id }, doc.data()); });
+        var remoteData = snapshot.docs.map(function (doc) { return Object.assign({ id: doc.id }, doc.data()); });
         if (remoteData.length > 0) { _data[col] = remoteData; saveLocal(); notify(); }
       });
     });
 
-    // Carga Paginada para Colecciones Pesadas (V2.2)
+    // Carga Paginada para Colecciones Pesadas con Smart Merge (V2.2)
     heavyCols.forEach(function(col) {
       window.firebase_db.collection(col)
         .orderBy('date', 'desc')
@@ -121,50 +122,86 @@ var DB = (function () {
         .onSnapshot(function(snapshot) {
           if (snapshot.metadata.hasPendingWrites) return;
           var remoteData = snapshot.docs.map(function(doc) { return Object.assign({ id: doc.id }, doc.data()); });
-          if (remoteData.length > 0) {
-            _data[col] = remoteData;
-            _lastDocs[col] = snapshot.docs[snapshot.docs.length - 1]; // Guardar puntero
-            saveLocal();
-            notify();
-          }
+          if (remoteData.length === 0) return;
+
+          // 🧠 SMART MERGE ENGINE (Fusión Cíclica)
+          var localData = _data[col] || [];
+          var localMap = {};
+          // Volcar datos actuales a un mapa para persistencia
+          localData.forEach(function(d) { localMap[d.id] = d; });
+
+          // 1. Determinar frontera cronológica (Oldest Remote)
+          var oldestRemote = remoteData[remoteData.length - 1];
+          var oldestDate = oldestRemote ? (oldestRemote.date || '') : '';
+
+          // 2. Purga Dinámica (Manejo de Deletes)
+          // Si un doc local está dentro de la ventana del Top 30 pero no vino en el lote -> Borrar
+          Object.keys(localMap).forEach(function(id) {
+            var doc = localMap[id];
+            var docDate = doc.date || '';
+            // Si el documento es más reciente o igual que el más viejo del Top 30 remoto
+            if (docDate >= oldestDate) {
+              var isPresent = remoteData.some(function(r) { return r.id === id; });
+              if (!isPresent) delete localMap[id];
+            }
+          });
+
+          // 3. Inyectar/Actualizar con datos remotos
+          remoteData.forEach(function(r) { localMap[r.id] = r; });
+
+          // 4. Reconstrucción y Ordenamiento
+          var merged = Object.values(localMap);
+          merged.sort(function(a, b) { 
+            return (b.date || '') > (a.date || '') ? 1 : ( (b.date || '') < (a.date || '') ? -1 : 0 ); 
+          });
+
+          _data[col] = merged;
+          _lastDocs[col] = snapshot.docs[snapshot.docs.length - 1]; // Mantener puntero para paginación
+          saveLocal();
+          notify();
         });
     });
   }
 
-  async function loadMore(col) {
+  function loadMore(col) {
     if (!_isCloudReady || !_lastDocs[col]) return;
-    try {
-      Utils.toast('Cargando registros anteriores...', 'info', 2000);
-      const snap = await window.firebase_db.collection(col)
-        .orderBy('date', 'desc')
-        .startAfter(_lastDocs[col])
-        .limit(50)
-        .get();
-
-      if (snap.empty) {
-        _lastDocs[col] = null;
-        Utils.toast('No hay más registros antiguos.', 'success');
-        return;
-      }
-
-      const newRecords = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-      
-      // Combinar sin duplicados
-      newRecords.forEach(function(r) {
-        if (!_data[col].find(function(x) { return x.id === r.id; })) {
-          _data[col].push(r);
+    Utils.toast('Cargando registros anteriores...', 'info', 2000);
+    window.firebase_db.collection(col)
+      .orderBy('date', 'desc')
+      .startAfter(_lastDocs[col])
+      .limit(50)
+      .get()
+      .then(function (snap) {
+        if (snap.empty) {
+          _lastDocs[col] = null;
+          Utils.toast('No hay más registros antiguos.', 'success');
+          return;
         }
-      });
 
-      _lastDocs[col] = snap.docs[snap.docs.length - 1];
-      notify();
-    } catch (e) {
-      console.error('Error loadMore:', e);
-    }
+        var newRecords = snap.docs.map(function (doc) { return Object.assign({ id: doc.id }, doc.data()); });
+
+        // Combinar sin duplicados
+        newRecords.forEach(function (r) {
+          if (!_data[col].find(function (x) { return x.id === r.id; })) {
+            _data[col].push(r);
+          }
+        });
+
+        // 🧠 ORDENAMIENTO POST-CARGA (V2.2): Mantener coherencia visual
+        _data[col].sort(function(a, b) { 
+          return (b.date || '') > (a.date || '') ? 1 : ( (b.date || '') < (a.date || '') ? -1 : 0 ); 
+        });
+
+        _lastDocs[col] = snap.docs[snap.docs.length - 1];
+        notify();
+      })
+      .catch(function (e) {
+        console.error('Error loadMore:', e);
+      });
   }
 
   function notify() {
-    _listeners.forEach(function(cb) { cb(_data); });
+    _listeners.forEach(function (cb) { cb(_data); });
   }
 
   function onReady(cb) {
@@ -173,10 +210,13 @@ var DB = (function () {
   }
 
   // ── 3. SYNCHRONOUS READS (Instant UI) ──────────────────────
-  function getAll(collection) { return _data[collection] || []; }
-  function getById(collection, id) { return getAll(collection).find(function(r) { return r.id === id; }) || null; }
+  function getAll(collection) { 
+    if (!_data[collection]) _data[collection] = [];
+    return _data[collection]; 
+  }
+  function getById(collection, id) { return getAll(collection).find(function (r) { return r.id === id; }) || null; }
   function getSettings() { return Object.assign({}, _data.settings); }
-  
+
   function nextOTNumber() {
     var num = _data.settings.nextOTNumber || 1;
     var year = new Date().getFullYear();
@@ -192,7 +232,7 @@ var DB = (function () {
   // ── 4. HYBRID WRITES (Poka-Yoke Client Side) ──────────────
   function create(collection, record) {
     if (!record.id) record.id = generateId();
-    
+
     // 1. Local
     if (!_data[collection]) _data[collection] = [];
     _data[collection].push(record);
@@ -200,45 +240,45 @@ var DB = (function () {
 
     // 2. Cloud (Background)
     if (_isCloudReady) {
-      window.firebase_db.collection(collection).doc(record.id).set(record).catch(function(err) {
+      window.firebase_db.collection(collection).doc(record.id).set(record).catch(function (err) {
         console.error('Error sincronización Cloud:', err);
         Utils.toast('⚠️ Error de conexión: El cambio se guardó solo localmente.', 'warning');
-        });
-        }
-        return record.id;
-        }
+      });
+    }
+    return record.id;
+  }
 
-        function update(collection, id, changes) {
-        var idx = (_data[collection] || []).findIndex(function(r) { return r.id === id; });
-        if (idx === -1) return false;
+  function update(collection, id, changes) {
+    var idx = (_data[collection] || []).findIndex(function (r) { return r.id === id; });
+    if (idx === -1) return false;
 
-        // 1. Local
-        Object.assign(_data[collection][idx], changes);
-        saveLocal();
+    // 1. Local
+    Object.assign(_data[collection][idx], changes);
+    saveLocal();
 
-        // 2. Cloud
-        if (_isCloudReady) {
-        window.firebase_db.collection(collection).doc(id).update(changes).catch(function(err) {
+    // 2. Cloud
+    if (_isCloudReady) {
+      window.firebase_db.collection(collection).doc(id).update(changes).catch(function (err) {
         console.error('Error sincronización Cloud:', err);
         Utils.toast('⚠️ Error de conexión: Actualización solo local.', 'warning');
-        });
-        }
+      });
+    }
     return true;
   }
 
   function remove(collection, id) {
     // 🛡️ REGLAS POKA-YOKE (Validación previa al borrado)
     if (collection === 'categories') {
-      if (getAll('items').some(function(i) { return i.categoryId === id; })) 
+      if (getAll('items').some(function (i) { return i.categoryId === id; }))
         throw new Error('No se puede eliminar una categoría con artículos asociados.');
     }
     if (collection === 'items') {
-      if (getAll('movements').some(function(m) { return m.itemId === id; })) 
+      if (getAll('movements').some(function (m) { return m.itemId === id; }))
         throw new Error('No se puede eliminar un artículo con historial de movimientos.');
     }
     if (collection === 'vehicles') {
-      if (getAll('workOrders').some(function(w) { return w.vehicleId === id; }) || 
-          getAll('fuelLogs').some(function(f) { return f.vehicleId === id; }))
+      if (getAll('workOrders').some(function (w) { return w.vehicleId === id; }) ||
+        getAll('fuelLogs').some(function (f) { return f.vehicleId === id; }))
         throw new Error('No se puede eliminar un vehículo con historial de registros.');
     }
     if (collection === 'users' && id === _data.settings.activeUserId) {
@@ -247,7 +287,7 @@ var DB = (function () {
 
     // 1. Local
     var arr = _data[collection];
-    var idx = arr.findIndex(function(r) { return r.id === id; });
+    var idx = arr.findIndex(function (r) { return r.id === id; });
     if (idx !== -1) {
       arr.splice(idx, 1);
       saveLocal();
@@ -265,7 +305,7 @@ var DB = (function () {
     var backup = JSON.stringify(_data);
     try {
       var result = cb();
-      saveLocal(); 
+      saveLocal();
       return result;
     } catch (e) {
       _data = JSON.parse(backup);
@@ -278,23 +318,26 @@ var DB = (function () {
     var item = getById('items', itemId);
     if (!item) return false;
     var opt = options || {};
-    
-    var newStock = item.stock;
-    if (type === 'entrada') newStock += qty;
-    else if (type === 'salida') newStock -= qty;
-    else if (type === 'ajuste') newStock = qty;
 
-    transaction(function() {
+    var sQty = Utils.safeNum(qty);
+    var currentStock = Utils.safeNum(item.stock);
+    var newStock = currentStock;
+
+    if (type === 'entrada') newStock = Utils.dec.add(currentStock, sQty);
+    else if (type === 'salida') newStock = Utils.dec.sub(currentStock, sQty);
+    else if (type === 'ajuste') newStock = sQty;
+
+    transaction(function () {
       update('items', itemId, { stock: newStock });
-      
-      var unitC = opt.unitCost || item.unitCost || 0;
+
+      var unitC = Utils.safeNum(opt.unitCost || item.unitCost || 0);
       var mov = Object.assign({
         itemId: itemId,
         itemName: item.name,
         type: type,
-        qty: qty,
+        qty: sQty,
         unitCost: unitC,
-        totalCost: Utils.dec.mul(qty, unitC),
+        totalCost: Utils.dec.mul(sQty, unitC), // dec.mul ya usa safeNum internamente tras mi cambio previo
         date: Utils.todayISO(),
         userId: _data.settings.activeUserId
       }, opt);
@@ -304,30 +347,49 @@ var DB = (function () {
   }
 
   // ── 6. CLOUD TOOLS ─────────────────────────────────────────
-  async function uploadToCloud() {
+  function uploadToCloud() {
     if (!_isCloudReady) return alert('Firebase no conectado.');
-    if (!confirm('¿Deseas subir todos los datos locales a la nube?')) return;
-
-    const collections = [
-      'categories', 'items', 'movements', 'workOrders', 
-      'vehicles', 'preventiveRoutines', 'fuelLogs', 
-      'vehicleDocuments', 'users', 'employees', 'positions'
+    if (!confirm('⚠️ ATENCIÓN: Se iniciará una sincronización masiva por lotes. ¿Deseas continuar?')) return;
+    var collections = [
+      'categories', 'items', 'movements', 'workOrders',
+      'vehicles', 'preventiveRoutines', 'fuelLogs',
+      'vehicleDocuments', 'users', 'employees', 'positions',
+      'maintenanceLogs', 'hoursLogs'
     ];
-
-    try {
-      await window.firebase_db.collection('settings').doc('config').set(_data.settings);
-      for (const col of collections) {
-        const batch = window.firebase_db.batch();
-        _data[col].forEach(record => {
-          const ref = window.firebase_db.collection(col).doc(record.id);
-          batch.set(ref, record);
+    var CHUNK_SIZE = 450;
+    // 1. Guardar configuración global primero
+    window.firebase_db.collection('settings').doc('config').set(_data.settings)
+      .then(function () {
+        var sequence = Promise.resolve();
+        
+        collections.forEach(function (col) {
+          var records = _data[col] || [];
+          if (records.length === 0) return;
+          // Dividir colección en trozos de 450
+          for (var i = 0; i < records.length; i += CHUNK_SIZE) {
+            (function (index, currentCol) {
+              var chunk = records.slice(index, index + CHUNK_SIZE);
+              sequence = sequence.then(function () {
+                var batch = window.firebase_db.batch();
+                chunk.forEach(function (record) {
+                  var ref = window.firebase_db.collection(currentCol).doc(record.id);
+                  batch.set(ref, record);
+                });
+                console.log('Sincronizando ' + currentCol + ': Lote desde ' + index);
+                return batch.commit();
+              });
+            })(i, col);
+          }
         });
-        await batch.commit();
-      }
-      alert('✅ Sincronización masiva completada.');
-    } catch (e) {
-      alert('❌ Error: ' + e.message);
-    }
+        return sequence;
+      })
+      .then(function () {
+        alert('✅ Sincronización industrial completada. Todos los registros han sido subidos en lotes seguros.');
+      })
+      .catch(function (e) {
+        console.error('Fallo en sincronización masiva:', e);
+        alert('❌ Error crítico: ' + e.message);
+      });
   }
 
   function saveSettings(changes) {

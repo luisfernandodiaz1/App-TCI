@@ -467,6 +467,16 @@ var WorkOrdersModule = (function () {
     data.routineId = isPrevFinal ? wizData.routineId : null;
     data.routineName = isPrevFinal ? wizData.routineName : null;
 
+    // ── Inyectar Checklist desde la Rutina ──
+    if (data.isPreventive && data.routineId) {
+      var routine = DB.getById('preventiveRoutines', data.routineId);
+      if (routine && routine.tasks && routine.tasks.length > 0) {
+        data.checklist = routine.tasks.map(function (t) {
+          return { task: t, completed: false };
+        });
+      }
+    }
+
     DB.create('workOrders', data);
     // ── Registrar primer log de actividad ──
     var newWO = DB.getAll('workOrders').find(function(w){ return w.number === data.number; });
@@ -501,7 +511,7 @@ var WorkOrdersModule = (function () {
     var userName = user ? user.name : 'Sistema';
     var log = wo.activityLog ? wo.activityLog.slice() : [];
     log.push({
-      ts: new Date().toISOString(),
+      ts: Utils.toLocalISO(),
       userId: userId || null,
       userName: userName,
       action: action
@@ -648,6 +658,17 @@ var WorkOrdersModule = (function () {
       '<h4 style="margin-bottom:8px;">Descripción</h4>' +
       '<p style="color:var(--text-secondary);line-height:1.7;margin-bottom:16px;">' + Utils.escapeHtml(wo.description) + '</p>' +
       '<h4 style="margin-bottom:8px;">Materiales</h4>' + matHtml +
+      // ── Checklist Visualización ──
+      (wo.checklist && wo.checklist.length > 0 ?
+        '<div class="divider"></div><h4 style="margin-bottom:12px;">📋 Checklist de Tareas Preventivas</h4>' +
+        '<div style="background:var(--bg-elevated);padding:12px;border-radius:8px;display:flex;flex-direction:column;gap:6px;">' +
+        wo.checklist.map(function (c) {
+          return '<div style="display:flex;align-items:center;gap:10px;font-size:0.9rem;">' +
+            '<span style="color:' + (c.completed ? 'var(--color-success)' : 'var(--text-muted)') + ';font-size:1.1rem;">' + (c.completed ? '✔' : '○') + '</span>' +
+            '<span style="' + (c.completed ? 'text-decoration:line-through;color:var(--text-muted);' : '') + '">' + Utils.escapeHtml(c.task) + '</span>' +
+            '</div>';
+        }).join('') +
+        '</div>' : '') +
       (wo.notes ? '<div class="divider"></div><h4 style="margin-bottom:8px;">Observaciones</h4><p class="text-secondary">' + Utils.escapeHtml(wo.notes) + '</p>' : '') +
       financialHtml +
       // ── MURO DE ACTIVIDAD ──
@@ -714,10 +735,20 @@ var WorkOrdersModule = (function () {
     Utils.confirm('¿Cancelar esta orden de trabajo?', 'Cancelar OT', function () {
       if (wo.status !== 'cancelada' && wo.materials) {
         wo.materials.forEach(function (m) {
-          if ((m.qtyDelivered || 0) > 0) {
+          var delivered = Utils.safeNum(m.qtyDelivered);
+          if (delivered > 0) {
             var item = DB.getById('items', m.itemId);
-            if (item) DB.update('items', m.itemId, { stock: item.stock + m.qtyDelivered });
-            DB.create('movements', { itemId: m.itemId, itemName: m.itemName, type: 'entrada', qty: m.qtyDelivered, date: Utils.todayISO(), reference: 'ANULACION OT', notes: 'Reversión automática por anulación de OT: ' + wo.number, userId: DB.getSettings().activeUserId });
+            if (item) {
+              var currentStock = Utils.safeNum(item.stock);
+              // 🧠 MOTOR DECIMAL V1.3: Retorno exacto
+              DB.update('items', m.itemId, { stock: Utils.dec.add(currentStock, delivered) });
+            }
+            DB.create('movements', { 
+              itemId: m.itemId, itemName: m.itemName, type: 'entrada', qty: delivered, 
+              date: Utils.todayISO(), reference: (wo.status === 'cancelada' ? 'ANULACION OT' : 'ELIMINACION OT'), 
+              notes: 'Reversión automática por gestión de OT: ' + wo.number, 
+              userId: (DB.getSettings() || {}).activeUserId 
+            });
           }
         });
       }
@@ -732,10 +763,20 @@ var WorkOrdersModule = (function () {
     Utils.confirm('¿Eliminar definitivamente esta OT?', 'Eliminar OT', function () {
       if (wo.status !== 'cancelada' && wo.materials) {
         wo.materials.forEach(function (m) {
-          if ((m.qtyDelivered || 0) > 0) {
+          var delivered = Utils.safeNum(m.qtyDelivered);
+          if (delivered > 0) {
             var item = DB.getById('items', m.itemId);
-            if (item) DB.update('items', m.itemId, { stock: item.stock + m.qtyDelivered });
-            DB.create('movements', { itemId: m.itemId, itemName: m.itemName, type: 'entrada', qty: m.qtyDelivered, date: Utils.todayISO(), reference: 'ELIMINACION OT', notes: 'Reversión automática por eliminación de OT: ' + wo.number, userId: DB.getSettings().activeUserId });
+            if (item) {
+              var currentStock = Utils.safeNum(item.stock);
+              // 🧠 MOTOR DECIMAL V1.3: Retorno exacto
+              DB.update('items', m.itemId, { stock: Utils.dec.add(currentStock, delivered) });
+            }
+            DB.create('movements', { 
+              itemId: m.itemId, itemName: m.itemName, type: 'entrada', qty: delivered, 
+              date: Utils.todayISO(), reference: 'ELIMINACION OT', 
+              notes: 'Reversión automática por eliminación de OT: ' + wo.number, 
+              userId: (DB.getSettings() || {}).activeUserId 
+            });
           }
         });
       }

@@ -81,14 +81,14 @@ var InventoryModule = (function () {
 
     // Cálculos de precisión decimal
     var totalInmovilizado = items.reduce(function (a, i) {
-      return Utils.dec.add(a, Utils.dec.mul(Number(i.stock) || 0, Number(i.unitCost) || 0));
+      return Utils.dec.add(a, Utils.dec.mul(i.stock, i.unitCost));
     }, 0);
 
     var entradasMes = movs.filter(function (m) { return m.type === 'entrada'; }).reduce(function (a, m) {
-      return Utils.dec.add(a, m.totalCost || 0);
+      return Utils.dec.add(a, m.totalCost);
     }, 0);
     var salidasMes = movs.filter(function (m) { return m.type === 'salida'; }).reduce(function (a, m) {
-      return Utils.dec.add(a, m.totalCost || 0);
+      return Utils.dec.add(a, m.totalCost);
     }, 0);
 
     // Calcular top consumidos
@@ -181,7 +181,7 @@ var InventoryModule = (function () {
       d.setDate(1);
       var monthKeys = [];
       for (var i = 0; i < maxMonths; i++) {
-        var key = d.toISOString().substring(0, 7);
+        var key = Utils.toLocalISO(d).substring(0, 7);
         monthKeys.unshift(key);
         monthlyMoves[key] = { entradas: 0, salidas: 0 };
         d.setMonth(d.getMonth() - 1);
@@ -274,7 +274,7 @@ var InventoryModule = (function () {
 
     // 2. Barra de Estado (Dashboard rápido)
     var totalValue = items.reduce(function (sum, i) {
-      return Utils.dec.add(sum, Utils.dec.mul(i.stock, i.unitCost || 0));
+      return Utils.dec.add(sum, Utils.dec.mul(i.stock, i.unitCost));
     }, 0);
 
     var statusBar = document.getElementById('inv-items-status-bar');
@@ -308,7 +308,7 @@ var InventoryModule = (function () {
             '<td><code style="background:var(--bg-elevated);padding:2px 8px;border-radius:4px;font-size:0.75rem;">' + Utils.escapeHtml(item.code || '—') + '</code></td>' +
             '<td><div class="font-medium">' + Utils.escapeHtml(item.name) + '</div></td>' +
             '<td>' + Utils.escapeHtml(catMap[item.categoryId] || '—') + '</td>' +
-            '<td><strong>' + Utils.fmtNum(item.stock) + '</strong> <span class="text-muted text-xs">' + Utils.escapeHtml(item.unit) + '</span></td>' +
+            '<td><strong>' + Utils.fmtNum(item.stock) + '</strong> <span class="text-muted text-xs">' + Utils.escapeHtml(item.unit) + '</span>' + (item.active === false ? '<br><span class="badge badge-red" style="font-size:0.65rem;padding:2px 4px;">Inactivo</span>' : '') + '</td>' +
             '<td>$ ' + Utils.fmtNum(item.unitCost || 0) + '</td>' +
             '<td><strong>$ ' + Utils.fmtNum(totalV) + '</strong></td>' +
             '<td><div class="table-actions">' +
@@ -502,6 +502,7 @@ var InventoryModule = (function () {
       '<div class="form-group"><label>Stock mínimo</label><input class="form-input" id="if-min" type="number" min="0" value="' + (item ? item.minStock : 5) + '"></div>' +
       '<div class="form-group"><label>Ubicación</label><input class="form-input" id="if-loc" value="' + Utils.escapeHtml(item ? item.location || '' : '') + '" placeholder="A-01, Bodega 2..."></div>' +
       '<div class="form-group"><label>Costo Unitario ($)</label><input class="form-input" id="if-cost" type="number" min="0" value="' + (item ? item.unitCost || 0 : 0) + '"></div>' +
+      '<div class="form-group"><label>Estado</label><div style="margin-top:8px;"><label class="flex items-center gap-2" style="cursor:pointer;"><input type="checkbox" id="if-active" ' + (item && item.active === false ? '' : 'checked') + '> Artículo Activo</label></div></div>' +
       '<div class="form-group span-2"><label>Descripción</label><textarea class="form-textarea" id="if-desc" rows="2">' + Utils.escapeHtml(item ? item.description || '' : '') + '</textarea></div>' +
       '</div></div>' +
       '<div class="modal-footer"><button class="btn btn-secondary" id="item-can">Cancelar</button><button class="btn btn-primary" id="item-sv">💾 Guardar</button></div>' +
@@ -522,6 +523,7 @@ var InventoryModule = (function () {
       var stock = parseFloat(document.getElementById('if-stock').value) || 0;
       var minStock = parseFloat(document.getElementById('if-min').value) || 0;
       var unitCost = parseFloat(document.getElementById('if-cost').value) || 0;
+      var active = document.getElementById('if-active').checked;
 
       if (stock < 0 || minStock < 0 || unitCost < 0) {
         Utils.toast('Los valores de stock y costo no pueden ser negativos.', 'error');
@@ -535,7 +537,8 @@ var InventoryModule = (function () {
         minStock: minStock,
         unitCost: unitCost,
         location: document.getElementById('if-loc').value.trim(),
-        description: document.getElementById('if-desc').value.trim()
+        description: document.getElementById('if-desc').value.trim(),
+        active: active
       };
       
       if (item) { 
@@ -665,25 +668,37 @@ var InventoryModule = (function () {
     document.getElementById('mov-sv').onclick = function () {
       var iId = document.getElementById('mf-item').value;
       var mtyp = document.getElementById('mf-type').value;
-      var qty = parseFloat(document.getElementById('mf-qty').value) || 0;
-      var cost = parseFloat(document.getElementById('mf-cost').value) || 0;
+      var qty = Utils.safeNum(document.getElementById('mf-qty').value);
+      var cost = Utils.safeNum(document.getElementById('mf-cost').value);
 
       if (!iId) { Utils.toast('Selecciona un artículo.', 'warning'); return; }
       if (qty <= 0) { Utils.toast('La cantidad debe ser mayor a 0.', 'error'); return; }
       if (mtyp === 'entrada' && cost < 0) { Utils.toast('El costo no puede ser negativo.', 'error'); return; }
 
       var it = DB.getById('items', iId);
-      var ns = mtyp === 'entrada' ? it.stock + qty : (mtyp === 'salida' ? it.stock - qty : qty);
-      if (ns < 0) { Utils.toast('No hay suficiente stock.', 'error'); return; }
-      
+      if (!it) return;
+
+      // 🧠 MOTOR DECIMAL V1.3: Cálculo de stock resultante
+      var currentStock = Utils.safeNum(it.stock);
+      var ns = 0;
+      if (mtyp === 'entrada') ns = Utils.dec.add(currentStock, qty);
+      else if (mtyp === 'salida') ns = Utils.dec.sub(currentStock, qty);
+      else if (mtyp === 'ajuste') ns = qty;
+
+      // 🛡️ POKA-YOKE: Bloqueo de stock negativo
+      if (ns < 0) { 
+        Utils.toast('❌ Operación cancelada: El stock resultante no puede ser negativo (Disponible: ' + currentStock + ').', 'error', 5000); 
+        return; 
+      }
+
       var mref = document.getElementById('mf-ref').value.trim();
       if (mtyp === 'salida' && !mref) {
         Utils.toast('⚠️ Control de Fugas: Las salidas de almacén requieren una Referencia u OT obligatoria.', 'warning');
         return;
       }
 
-      var movementUnitCost = mtyp === 'entrada' ? cost : (it.unitCost || 0);
-      var totalC = Utils.dec.mul(movementUnitCost, mtyp === 'ajuste' ? Math.abs(qty - it.stock) : qty);
+      var movementUnitCost = mtyp === 'entrada' ? cost : Utils.safeNum(it.unitCost);
+      var totalC = Utils.dec.mul(movementUnitCost, mtyp === 'ajuste' ? Math.abs(Utils.dec.sub(qty, currentStock)) : qty);
 
       DB.transaction(function () {
         if (mtyp === 'entrada' && cost > 0) {
@@ -696,21 +711,43 @@ var InventoryModule = (function () {
           reference: document.getElementById('mf-ref').value.trim(),
           notes: document.getElementById('mf-notes').value.trim(),
           userId: settings.activeUserId,
-          userName: DB.getById('users', settings.activeUserId).name
+          userName: (DB.getById('users', settings.activeUserId) || { name: 'Usuario' }).name
         });
       });
       Utils.toast('Movimiento registrado.', 'success');
       close(); render(); App.updateBadges();
-    };
-  }
+    };  }
 
   function deleteItem(id) {
     var item = DB.getById('items', id);
-    var movsCount = DB.getAll('movements').filter(function (m) { return m.itemId === id; }).length;
-    if (movsCount > 0) {
-      Utils.toast('Bloqueado: Este artículo tiene ' + movsCount + ' movimiento(s) histórico(s). Por seguridad contable no puede ser eliminado. Ajusta su stock a 0 en su lugar.', 'error', 6000);
+    if (!item) return;
+
+    // 🛡️ BLINDAJE DE INTEGRIDAD (V2.2): Escaneo cruzado exhaustivo
+    var movements = DB.getAll('movements').filter(function (m) { return m.itemId === id; });
+    var workOrders = DB.getAll('workOrders').filter(function (w) {
+      return (w.materials || []).some(function (m) { return m.itemId === id; });
+    });
+    var maintenanceLogs = (DB.getAll('maintenanceLogs') || []).filter(function (l) {
+      return (l.materialsUsed || []).some(function (m) { return m.id === id; });
+    });
+
+    var hasHistory = movements.length > 0 || workOrders.length > 0 || maintenanceLogs.length > 0;
+
+    if (hasHistory) {
+      Utils.confirm(
+        "❌ Error de Integridad: El artículo '" + item.name + "' tiene historial vinculado (OTs, Movimientos o Bitácora).\n\n¿Deseas INACTIVARLO en su lugar? (Esto lo ocultará de los selectores de taller sin romper los reportes pasados).",
+        "Protección de Almacén",
+        function () {
+          DB.update('items', id, { active: false });
+          Utils.toast('Artículo inactivado correctamente.', 'info');
+          render();
+          App.updateBadges();
+        },
+        true
+      );
       return;
     }
+
     Utils.confirm('¿Eliminar el artículo "' + item.name + '"?', 'Eliminar Artículo', function () {
       try {
         DB.remove('items', id);
