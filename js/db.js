@@ -417,6 +417,32 @@ var DB = (function () {
     };
   }
 
+  function exportAll() {
+    return JSON.stringify(_data, null, 2);
+  }
+
+  function importAll(jsonStr) {
+    try {
+      var parsed = JSON.parse(jsonStr);
+      if (parsed && typeof parsed === 'object') {
+        _data = migrateData(parsed);
+        saveLocal();
+        notify();
+        return true;
+      }
+    } catch (e) {
+      console.error('Error importing backup:', e);
+      return false;
+    }
+    return false;
+  }
+
+  function reset() {
+    _data = seed();
+    saveLocal();
+    notify();
+  }
+
   // Auto-init
   init();
 
@@ -436,6 +462,9 @@ var DB = (function () {
     uploadToCloud: uploadToCloud,
     loadMore: loadMore,
     transaction: transaction,
+    exportAll: exportAll,
+    importAll: importAll,
+    reset: reset,
     isCloudReady: function () { return _isCloudReady; }
   };
 })();

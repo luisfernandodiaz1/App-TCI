@@ -380,9 +380,26 @@ var Utils = (function () {
         return '<tr><td>' + equipoLabel + '</td><td>' + equipoVal + '</td><td>Vehículo</td><td>' + escapeHtml(wo.vehiclePlate || '—') + '</td></tr>';
       })() +
       '</tbody></table>' +
-      '<h2 style="margin-top:20px;margin-bottom:6px;">Descripción del Trabajo</h2>' +
-      '<p style="border:1px solid #ccc;padding:10px;min-height:50px;">' + escapeHtml(wo.description) + '</p>' +
-      '<h2 style="margin-top:20px;margin-bottom:6px;">Materiales Solicitados</h2>' +
+      '<h2 style="margin-top:20px;margin-bottom:6px;">Descripción del Trabajo / Checklist</h2>' +
+      '<div style="border:1px solid #ccc;padding:12px;min-height:40px;margin-bottom:10px;">' + 
+      '<strong>Instrucción General:</strong><br>' + escapeHtml(wo.description) + 
+      '</div>';
+
+    // ── CHECKLIST PREVENTIVO INTEGRADO (V2.3) ───────────────────────
+    if (wo.checklist && wo.checklist.length > 0) {
+      html += '<div style="margin-left:20px;margin-top:10px;display:flex;flex-direction:column;gap:5px;">' +
+        '<h4 style="margin:0 0 8px 0;font-size:11pt;">📋 Puntos de Inspección Obligatorios:</h4>' +
+        wo.checklist.map(function (c) {
+          var isComp = !!c.completed;
+          return '<div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;font-size:10.5pt;">' +
+            '<div style="width:20px;height:20px;border:1.5px solid #333;text-align:center;line-height:20px;flex-shrink:0;">' + (isComp ? '✔' : '&nbsp;') + '</div>' +
+            '<span style="' + (isComp ? 'text-decoration:line-through;color:#666;' : '') + '">' + escapeHtml(c.task || 'Inspección de rutina') + '</span>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+    }
+
+    html += '<h2 style="margin-top:20px;margin-bottom:6px;">Materiales Solicitados</h2>' +
       '<table><thead><tr><th>Material</th><th style="text-align:center;width:80px;">Cant. Req.</th><th style="text-align:center;width:80px;">Unidad</th><th style="text-align:center;width:80px;">Entregado</th></tr></thead>' +
       '<tbody>' + matRows + '</tbody></table>' +
       '<h2 style="margin-top:20px;margin-bottom:6px;">Observaciones</h2>' +
