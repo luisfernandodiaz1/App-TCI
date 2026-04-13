@@ -188,7 +188,12 @@ var WorkOrdersModule = (function () {
     if (!prefillData && !preloadVehicleId) {
       wizData = {}; wizMats = []; wizStep = 1;
     }
-    if (preloadVehicleId) { wizData.vehicleId = preloadVehicleId; }
+    if (preloadVehicleId) { 
+      wizData.vehicleId = preloadVehicleId; 
+      // 🧠 PRE-CARGA INTELIGENTE (V2.3): Buscar horas actuales para evitar el '0'
+      var pv = DB.getById('vehicles', preloadVehicleId);
+      if (pv) wizData.vehicleHours = pv.hours || 0;
+    }
     // Si viene de una rutina preventiva, pre-cargar datos
     if (prefillData) {
       wizData.routineId = prefillData.routineId || null;
@@ -522,11 +527,19 @@ var WorkOrdersModule = (function () {
   // ── Expose for inline onclick ──────────────────────────────
   function _rmMat(i) { wizMats.splice(i, 1); renderWizMatList(); }
   function updateWizKm(sel) {
-    if (!sel.value) return;
+    if (!sel || !sel.value) return;
     var opt = sel.options[sel.selectedIndex];
-    var hours = opt.getAttribute('data-hr');
+    var hours = parseFloat(opt.getAttribute('data-hr')) || 0;
+    
+    // Sincronizar estado interno y UI
+    wizData.vehicleHours = hours;
     var input = document.getElementById('wf-hr-entry');
-    if (input) input.value = hours;
+    if (input) {
+      input.value = hours;
+      // Pequeño efecto visual para confirmar el cambio
+      input.style.backgroundColor = 'rgba(56, 189, 248, 0.1)';
+      setTimeout(function(){ input.style.backgroundColor = ''; }, 300);
+    }
   }
 
   // ── Edit existing OT ──────────────────────────────────────
